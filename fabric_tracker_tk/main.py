@@ -14,9 +14,10 @@ class FabricTrackerApp(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        self.dashboard_frame = DashboardFrame(self.notebook)
-        self.entries_frame = EntriesFrame(self.notebook)
-        self.masters_frame = MastersFrame(self.notebook)
+        # Pass self as controller to all frames
+        self.entries_frame = EntriesFrame(self.notebook, self)
+        self.dashboard_frame = DashboardFrame(self.notebook, self)
+        self.masters_frame = MastersFrame(self.notebook, self)
 
         self.notebook.add(self.entries_frame, text="Entries")
         self.notebook.add(self.dashboard_frame, text="Dashboard")
