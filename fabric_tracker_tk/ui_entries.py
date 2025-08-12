@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 import db
 import datetime
 
-class EntryScreen(ttk.Frame):
+class EntriesFrame(ttk.Frame):  # Renamed for consistency
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
