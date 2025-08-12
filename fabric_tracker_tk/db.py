@@ -1,4 +1,13 @@
 # db.py
+"""
+Database utilities, migrations, and helpers.
+
+- Keeps dates in DB as ISO YYYY-MM-DD (for correct sorting & queries).
+- Provides UI <-> DB date conversion helpers for DD/MM/YYYY display/entry.
+- Creates/updates required tables: suppliers, yarn_types, purchases, batches, lots, dyeing_outputs.
+- Backup before migrations.
+"""
+
 import sqlite3
 import os
 import shutil
@@ -7,13 +16,60 @@ from datetime import datetime
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 
+# -----------------------
+# Date helpers
+# -----------------------
+def ui_to_db_date(ui_date_str):
+    """
+    Convert DD/MM/YYYY (UI) -> YYYY-MM-DD (DB).
+    Returns string in ISO or raises ValueError if invalid.
+    Accepts also already-ISO strings and returns them unchanged.
+    """
+    if not ui_date_str:
+        return ""
+    ui_date_str = ui_date_str.strip()
+    # if already ISO
+    if "-" in ui_date_str and len(ui_date_str.split("-")[0]) == 4:
+        return ui_date_str
+    # assume DD/MM/YYYY
+    try:
+        d = datetime.strptime(ui_date_str, "%d/%m/%Y")
+        return d.strftime("%Y-%m-%d")
+    except Exception:
+        raise ValueError(f"Invalid date format (expected DD/MM/YYYY): '{ui_date_str}'")
+
+def db_to_ui_date(db_date_str):
+    """
+    Convert YYYY-MM-DD (DB) -> DD/MM/YYYY (UI).
+    If empty or None, return empty string.
+    """
+    if not db_date_str:
+        return ""
+    db_date_str = db_date_str.strip()
+    # if already in dd/mm/yyyy format
+    if "/" in db_date_str:
+        return db_date_str
+    try:
+        d = datetime.strptime(db_date_str, "%Y-%m-%d")
+        return d.strftime("%d/%m/%Y")
+    except Exception:
+        # fallback: return as-is
+        return db_date_str
+
+# -----------------------
+# Backup & connection
+# -----------------------
 def backup_db():
+    """Create a timestamped copy of the DB in BACKUP_DIR and return its path."""
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
     if os.path.exists(DB_PATH):
         shutil.copy2(DB_PATH, dest)
+    else:
+        # create empty DB copy if none exists
+        open(dest, "wb").close()
     return dest
 
 def get_connection():
@@ -21,24 +77,26 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# -----------------------
+# Initialization / migration
+# -----------------------
 def init_db():
     """
-    Initialize DB and perform migrations. Backups current DB before changes.
+    Initialize DB and perform migrations. Creates backup before running migrations.
     """
-    # ensure db file exists
+    # ensure DB exists
     created = False
     if not os.path.exists(DB_PATH):
         open(DB_PATH, "w").close()
         created = True
 
-    # backup first
     backup = backup_db()
     print(f"[DB] Backup created at {backup}")
 
     conn = get_connection()
     cur = conn.cursor()
 
-    # --- core existing tables: purchases, suppliers, yarn_types ---
+    # --- suppliers / masters table ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS suppliers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,12 +105,17 @@ def init_db():
         color_code TEXT DEFAULT ''
     )
     """)
+
+    # --- yarn types ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS yarn_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE
     )
     """)
+
+    # --- purchases (raw incoming/outgoing records) ---
+    # date stored as YYYY-MM-DD in DB
     cur.execute("""
     CREATE TABLE IF NOT EXISTS purchases (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,12 +131,12 @@ def init_db():
     )
     """)
 
-    # --- new tables for batches, lots, transactions linking to fabricators ---
+    # --- batches & lots ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS batches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_ref TEXT,                 -- user visible batch id (e.g., "200")
-        fabricator_id INTEGER,          -- masters id
+        fabricator_id INTEGER,          -- suppliers.id
         product_name TEXT,
         expected_lots INTEGER DEFAULT 0,
         composition TEXT,               -- free-text composition
@@ -86,18 +149,18 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_id INTEGER,
         lot_no TEXT,            -- e.g., "200/1"
-        lot_index INTEGER,      -- 1,2,3...
+        lot_index INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
     """)
 
-    # table to record dyeing outputs / returns (so we can link original knitter records)
+    # --- dyeing outputs: returned items after dyeing ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dyeing_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lot_id INTEGER,
-        dyeing_unit_id INTEGER,    -- supplier.id for dyeing unit
+        dyeing_unit_id INTEGER,
         returned_date TEXT,
         returned_qty_kg REAL,
         returned_qty_rolls INTEGER,
@@ -107,21 +170,24 @@ def init_db():
     )
     """)
 
-    # index hints (speed up queries)
+    # indexes
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
 
     conn.commit()
     conn.close()
+
     if created:
         print("[DB] New DB created and initialized.")
     else:
         print("[DB] DB init/migrations complete.")
 
-# Helper convenience queries used by UI
+# -----------------------
+# Helper functions (CRUD + convenience)
+# -----------------------
 def get_fabricators(fab_type):
-    """Return list of suppliers of given type: 'knitting_unit' or 'dyeing_unit'"""
+    """Return list of master rows (sqlite3.Row) of given type ('knitting_unit' or 'dyeing_unit')."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM suppliers WHERE type=? ORDER BY name", (fab_type,))
@@ -140,6 +206,13 @@ def update_master_color_and_type(name, mtype, color_hex):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
+    conn.commit()
+    conn.close()
+
+def delete_master_by_name(name):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM suppliers WHERE name=?", (name,))
     conn.commit()
     conn.close()
 
@@ -166,7 +239,6 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
 def create_lot(batch_id, lot_index):
     conn = get_connection()
     cur = conn.cursor()
-    # get batch_ref for forming lot_no
     cur.execute("SELECT batch_ref FROM batches WHERE id=?", (batch_id,))
     row = cur.fetchone()
     batch_ref = row["batch_ref"] if row else str(batch_id)
@@ -177,22 +249,84 @@ def create_lot(batch_id, lot_index):
     conn.close()
     return lid
 
-def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes=""):
+def find_lot_by_lotno(lot_no):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM lots WHERE lot_no=?", (lot_no,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+def record_purchase(date_ui, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes=""):
+    """
+    date_ui: DD/MM/YYYY (UI). Will be converted to ISO for storage.
+    """
+    # convert date
+    try:
+        db_date = ui_to_db_date(date_ui) if date_ui else ""
+    except ValueError:
+        # allow direct ISO if user passed that
+        db_date = date_ui
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes))
+    """, (db_date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes))
     conn.commit()
     conn.close()
 
-def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
+def record_dyeing_output(lot_id, dyeing_unit_id, returned_date_ui, returned_qty_kg, returned_qty_rolls, notes=""):
+    try:
+        db_date = ui_to_db_date(returned_date_ui) if returned_date_ui else ""
+    except ValueError:
+        db_date = returned_date_ui
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes))
+    """, (lot_id, dyeing_unit_id, db_date, returned_qty_kg, returned_qty_rolls, notes))
     conn.commit()
     conn.close()
+
+# convenience read helpers used by UI modules
+def list_suppliers():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM suppliers ORDER BY name")
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def list_yarn_types():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM yarn_types ORDER BY name")
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def add_yarn_type(name):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO yarn_types (name) VALUES (?)", (name,))
+    conn.commit()
+    conn.close()
+
+# --------- Additional report helpers ----------
+def get_purchases_between_dates(start_iso, end_iso):
+    """Get purchases where date between ISO start and end (inclusive)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to
+        FROM purchases
+        WHERE date >= ? AND date <= ?
+        ORDER BY date
+    """, (start_iso, end_iso))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+# End of db.py
