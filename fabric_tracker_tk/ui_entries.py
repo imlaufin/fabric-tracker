@@ -1,175 +1,152 @@
-# ui_entries.py
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk
+from tkinter import messagebox
 import db
 from datetime import datetime
 
+
+class AutocompleteCombobox(ttk.Combobox):
+    """A combobox that autocompletes as you type."""
+    def set_completion_list(self, completion_list):
+        self._completion_list = sorted(completion_list, key=str.lower)
+        self['values'] = self._completion_list
+        self.bind('<KeyRelease>', self._handle_keyrelease)
+
+    def _handle_keyrelease(self, event):
+        if event.keysym in ("BackSpace", "Left", "Right", "Up", "Down"):
+            return
+        value = self.get()
+        if value == '':
+            self['values'] = self._completion_list
+        else:
+            data = [item for item in self._completion_list if item.lower().startswith(value.lower())]
+            self['values'] = data
+        if self['values']:
+            self.event_generate('<Down>')
+
+
 class EntriesFrame(ttk.Frame):
-    def __init__(self, parent, controller=None):
+    def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
         self.build_ui()
-        self.refresh_lists()
 
     def build_ui(self):
-        frm = ttk.Frame(self)
-        frm.pack(fill="x", padx=8, pady=8)
+        form_frame = ttk.Frame(self)
+        form_frame.pack(side="top", fill="x", padx=10, pady=10)
 
-        ttk.Label(frm, text="Date").grid(row=0, column=0)
-        self.date_e = ttk.Entry(frm, width=12); self.date_e.grid(row=0, column=1); self.date_e.insert(0, datetime.today().strftime("%Y-%m-%d"))
-        ttk.Label(frm, text="Batch ID").grid(row=0, column=2)
-        self.batch_e = ttk.Entry(frm, width=12); self.batch_e.grid(row=0, column=3)
+        # Date
+        ttk.Label(form_frame, text="Date (dd/mm/yyyy):").grid(row=0, column=0, sticky="w")
+        self.date_var = tk.StringVar()
+        self.date_entry = ttk.Entry(form_frame, textvariable=self.date_var)
+        self.date_entry.grid(row=0, column=1, sticky="ew")
+        self.date_var.set(datetime.now().strftime("%d/%m/%Y"))
 
-        ttk.Label(frm, text="Lot No (optional)").grid(row=0, column=4)
-        self.lot_e = ttk.Entry(frm, width=12); self.lot_e.grid(row=0, column=5)
+        # Supplier
+        ttk.Label(form_frame, text="Supplier:").grid(row=0, column=2, sticky="w", padx=(10, 0))
+        self.supplier_var = tk.StringVar()
+        self.supplier_combo = AutocompleteCombobox(form_frame, textvariable=self.supplier_var)
+        self.supplier_combo.grid(row=0, column=3, sticky="ew")
 
-        ttk.Label(frm, text="Supplier").grid(row=1, column=0)
-        self.supplier_cb = ttk.Combobox(frm, width=25); self.supplier_cb.grid(row=1, column=1)
+        # Delivered To
+        ttk.Label(form_frame, text="Delivered To:").grid(row=0, column=4, sticky="w", padx=(10, 0))
+        self.delivered_to_var = tk.StringVar()
+        self.delivered_to_combo = AutocompleteCombobox(form_frame, textvariable=self.delivered_to_var)
+        self.delivered_to_combo.grid(row=0, column=5, sticky="ew")
+        self.delivered_to_combo.bind("<Return>", self.save_entry)
 
-        ttk.Label(frm, text="Yarn Type").grid(row=1, column=2)
-        self.yarn_cb = ttk.Combobox(frm, width=25); self.yarn_cb.grid(row=1, column=3)
+        # Yarn Type
+        ttk.Label(form_frame, text="Yarn Type:").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        self.yarn_var = tk.StringVar()
+        self.yarn_entry = ttk.Entry(form_frame, textvariable=self.yarn_var)
+        self.yarn_entry.grid(row=1, column=1, sticky="ew", pady=(10, 0))
 
-        ttk.Label(frm, text="Qty (kg)").grid(row=2, column=0)
-        self.kg_e = ttk.Entry(frm, width=12); self.kg_e.grid(row=2, column=1)
-        ttk.Label(frm, text="Qty (rolls)").grid(row=2, column=2)
-        self.rolls_e = ttk.Entry(frm, width=12); self.rolls_e.grid(row=2, column=3)
+        # Quantity kg
+        ttk.Label(form_frame, text="Qty (kg):").grid(row=1, column=2, sticky="w", padx=(10, 0), pady=(10, 0))
+        self.kg_var = tk.DoubleVar()
+        self.kg_entry = ttk.Entry(form_frame, textvariable=self.kg_var)
+        self.kg_entry.grid(row=1, column=3, sticky="ew", pady=(10, 0))
 
-        ttk.Label(frm, text="Delivered To").grid(row=3, column=0)
-        self.delivered_cb = ttk.Combobox(frm, width=25); self.delivered_cb.grid(row=3, column=1)
+        # Quantity rolls
+        ttk.Label(form_frame, text="Qty (rolls):").grid(row=1, column=4, sticky="w", padx=(10, 0), pady=(10, 0))
+        self.rolls_var = tk.IntVar()
+        self.rolls_entry = ttk.Entry(form_frame, textvariable=self.rolls_var)
+        self.rolls_entry.grid(row=1, column=5, sticky="ew", pady=(10, 0))
 
-        ttk.Button(frm, text="Save", command=self.save).grid(row=4, column=0, pady=8)
-        ttk.Button(frm, text="Clear", command=self.clear_form).grid(row=4, column=1)
+        # Save button
+        save_btn = ttk.Button(form_frame, text="Save Entry", command=self.save_entry)
+        save_btn.grid(row=2, column=0, columnspan=6, pady=10)
 
-        ttk.Button(frm, text="Create Lot for Batch", command=self.create_lot_dialog).grid(row=4, column=2)
-        ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3)
+        # List of entries
+        self.tree = ttk.Treeview(self, columns=("date", "supplier", "delivered_to", "yarn", "kg", "rolls"), show="headings")
+        for col, txt, w in [
+            ("date", "Date", 90),
+            ("supplier", "Supplier", 150),
+            ("delivered_to", "Delivered To", 150),
+            ("yarn", "Yarn Type", 120),
+            ("kg", "Qty (kg)", 80),
+            ("rolls", "Qty (rolls)", 90)
+        ]:
+            self.tree.heading(col, text=txt)
+            self.tree.column(col, width=w)
+        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # recent entries table
-        cols = ("date","batch","lot","supplier","yarn","kg","rolls","delivered")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=12)
-        for c, h, w in zip(cols, ["Date","Batch","Lot","Supplier","Yarn Type","Kg","Rolls","Delivered"], [90,90,110,150,150,80,80,140]):
-            self.tree.heading(c, text=h)
-            self.tree.column(c, width=w)
-        self.tree.pack(fill="both", expand=True, padx=8, pady=8)
-        self.reload_entries()
+        self.load_dropdowns()
+        self.load_entries()
 
-        # enter key in delivered to saves
-        self.delivered_cb.bind("<Return>", lambda e: self.save())
+    def load_dropdowns(self):
+        suppliers = [s["name"] for s in db.list_suppliers()]
+        self.supplier_combo.set_completion_list(suppliers)
+        self.delivered_to_combo.set_completion_list(suppliers)
 
-    def refresh_lists(self):
-        # suppliers for comboboxes including masters and existing used suppliers
+    def load_entries(self):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
         conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM suppliers ORDER BY name")
-        masters = [r["name"] for r in cur.fetchall()]
-        cur.execute("SELECT DISTINCT supplier FROM purchases WHERE supplier IS NOT NULL AND supplier != ''")
-        used = [r["supplier"] for r in cur.fetchall() if r["supplier"]]
-        cur.execute("SELECT DISTINCT delivered_to FROM purchases WHERE delivered_to IS NOT NULL AND delivered_to != ''")
-        used2 = [r["delivered_to"] for r in cur.fetchall() if r["delivered_to"]]
-        all_suppliers = sorted(set(masters + used + used2))
-        self.supplier_cb["values"] = all_suppliers
-        self.delivered_cb["values"] = all_suppliers
+        rows = conn.execute("SELECT * FROM purchases ORDER BY date DESC").fetchall()
+        conn.close()
+        for r in rows:
+            self.tree.insert("", "end", values=(
+                db.db_to_ui_date(r["date"]),
+                r["supplier"],
+                r["delivered_to"],
+                r["yarn_type"],
+                r["qty_kg"],
+                r["qty_rolls"]
+            ))
 
-        cur.execute("SELECT name FROM yarn_types ORDER BY name")
-        yarns = [r["name"] for r in cur.fetchall()]
-        cur.execute("SELECT DISTINCT yarn_type FROM purchases WHERE yarn_type != ''")
-        usedy = [r["yarn_type"] for r in cur.fetchall() if r["yarn_type"]]
-        self.yarn_cb["values"] = sorted(set(yarns + usedy))
+    def save_entry(self, event=None):
+        try:
+            date_db = db.ui_to_db_date(self.date_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid date", "Please enter the date in dd/mm/yyyy format.")
+            return
+
+        supplier = self.supplier_var.get().strip()
+        delivered_to = self.delivered_to_var.get().strip()
+        yarn = self.yarn_var.get().strip()
+        qty_kg = self.kg_var.get()
+        qty_rolls = self.rolls_var.get()
+
+        if not supplier or not delivered_to or not yarn:
+            messagebox.showerror("Missing Data", "Please fill all fields.")
+            return
+
+        conn = db.get_connection()
+        conn.execute("""
+            INSERT INTO purchases (date, supplier, delivered_to, yarn_type, qty_kg, qty_rolls)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (date_db, supplier, delivered_to, yarn, qty_kg, qty_rolls))
+        conn.commit()
         conn.close()
 
-    def reload_entries(self):
-        for r in self.tree.get_children():
-            self.tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to FROM purchases ORDER BY date DESC")
-        for row in cur.fetchall():
-            self.tree.insert("", "end", values=(row["date"], row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["delivered_to"]))
-        conn.close()
-
-    def save(self):
-        date = self.date_e.get().strip()
-        batch = self.batch_e.get().strip()
-        lot = self.lot_e.get().strip()
-        supplier = self.supplier_cb.get().strip()
-        yarn = self.yarn_cb.get().strip()
-        try:
-            kg = float(self.kg_e.get().strip() or 0)
-        except ValueError:
-            messagebox.showerror("Invalid", "Qty kg must be a number")
-            return
-        try:
-            rolls = int(self.rolls_e.get().strip() or 0)
-        except ValueError:
-            messagebox.showerror("Invalid", "Qty rolls must be integer")
-            return
-        delivered = self.delivered_cb.get().strip()
-        if not date or not supplier or not yarn or (kg==0 and rolls==0) or not delivered:
-            messagebox.showwarning("Missing", "Please fill required fields")
-            return
-
-        # Record in purchases table
-        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, delivered, notes="")
-        # refresh lists and entries
-        self.refresh_lists()
-        self.reload_entries()
-
-        # keep delivered and yarn filled but clear batch/quantities for quick repeated entry
-        self.kg_e.delete(0, tk.END)
-        self.rolls_e.delete(0, tk.END)
-        self.batch_e.delete(0, tk.END)
-        self.lot_e.delete(0, tk.END)
-        self.kg_e.focus()
-
-        # If controller provided and has knitting/dyeing tabs, reload relevant tabs
-        if self.controller and hasattr(self.controller, "fabricators_frame"):
-            try:
-                self.controller.fabricators_frame.build_tabs()
-            except Exception:
-                pass
+        self.load_entries()
+        self.clear_form()
 
     def clear_form(self):
-        self.batch_e.delete(0, tk.END)
-        self.lot_e.delete(0, tk.END)
-        self.kg_e.delete(0, tk.END)
-        self.rolls_e.delete(0, tk.END)
-
-    def create_lot_dialog(self):
-        batch_ref = self.batch_e.get().strip()
-        if not batch_ref:
-            messagebox.showwarning("Batch required", "Enter the batch id first (temporary allowed).")
-            return
-        # find batch id in DB or ask to create
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id, expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
-        row = cur.fetchone()
-        if not row:
-            if messagebox.askyesno("Batch not found", "Batch not found. Create new batch entry?"):
-                # create batch with zero expected lots initially
-                fabricator_name = self.delivered_cb.get().strip()
-                # find fabricator id
-                cur.execute("SELECT id FROM suppliers WHERE name=?", (fabricator_name,))
-                fr = cur.fetchone()
-                fid = fr["id"] if fr else None
-                b_id = db.create_batch(batch_ref, fid if fid else None, "", 0, "")
-            else:
-                conn.close()
-                return
-        else:
-            b_id = row["id"]
-        # ask how many lots to create or index
-        try:
-            lots = int(simpledialog.askstring("Lots", "How many lots to create?", parent=self) or "0")
-        except Exception:
-            lots = 0
-        if lots <= 0:
-            conn.close()
-            return
-        # create sequential lots
-        # find current max index
-        cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
-        maxidx = cur.fetchone()["maxidx"] or 0
-        for i in range(1, lots+1):
-            db.create_lot(b_id, maxidx + i)
-        conn.close()
-        messagebox.showinfo("Done", f"{lots} lots created.")
+        self.date_var.set(datetime.now().strftime("%d/%m/%Y"))
+        self.supplier_var.set("")
+        self.delivered_to_var.set("")
+        self.yarn_var.set("")
+        self.kg_var.set(0)
+        self.rolls_var.set(0)
