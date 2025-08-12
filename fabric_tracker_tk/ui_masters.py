@@ -1,118 +1,119 @@
+# ui_masters.py
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, colorchooser
 import db
 
+FAB_TYPES = [("Yarn Supplier", "yarn_supplier"), ("Knitting Unit", "knitting_unit"), ("Dyeing Unit", "dyeing_unit")]
+
 class MastersFrame(ttk.Frame):
-    def __init__(self, parent, controller):
+    def __init__(self, parent, controller=None, on_change_callback=None):
         super().__init__(parent)
         self.controller = controller
+        self.on_change_callback = on_change_callback
         self.build_ui()
+        self.load_suppliers()
 
     def build_ui(self):
-        # Suppliers Section
-        suppliers_frame = ttk.LabelFrame(self, text="Suppliers")
-        suppliers_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=10, pady=8)
 
-        self.supplier_entry = ttk.Entry(suppliers_frame)
-        self.supplier_entry.pack(side="left", padx=5, pady=5)
-        ttk.Button(suppliers_frame, text="Add Supplier", command=self.add_supplier).pack(side="left", padx=5, pady=5)
+        ttk.Label(top, text="Name:").grid(row=0, column=0, sticky="w")
+        self.name_entry = ttk.Entry(top, width=30)
+        self.name_entry.grid(row=0, column=1, padx=5)
 
-        self.suppliers_tree = ttk.Treeview(suppliers_frame, columns=("name",), show="headings", height=5)
-        self.suppliers_tree.heading("name", text="Supplier Name")
-        self.suppliers_tree.pack(fill="both", expand=True, padx=5, pady=5)
+        ttk.Label(top, text="Type:").grid(row=0, column=2, sticky="w")
+        self.type_var = tk.StringVar(value="yarn_supplier")
+        self.type_cb = ttk.Combobox(top, values=[t[0] for t in FAB_TYPES], state="readonly", width=18)
+        self.type_cb.grid(row=0, column=3, padx=5)
+        self.type_cb.current(0)
 
-        ttk.Button(suppliers_frame, text="Delete Selected", command=self.delete_supplier).pack(pady=5)
+        ttk.Label(top, text="Color:").grid(row=0, column=4, sticky="w")
+        self.color_btn = ttk.Button(top, text="Choose", command=self.choose_color)
+        self.color_btn.grid(row=0, column=5, padx=5)
 
-        # Yarn Types Section
-        yarn_frame = ttk.LabelFrame(self, text="Yarn Types")
-        yarn_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        ttk.Button(top, text="Add / Update", command=self.add_or_update).grid(row=0, column=6, padx=8)
 
-        self.yarn_entry = ttk.Entry(yarn_frame)
-        self.yarn_entry.pack(side="left", padx=5, pady=5)
-        ttk.Button(yarn_frame, text="Add Yarn Type", command=self.add_yarn_type).pack(side="left", padx=5, pady=5)
+        ttk.Button(top, text="Reload Fabricators", command=self.reload_cb_and_notify).grid(row=0, column=7, padx=8)
 
-        self.yarn_tree = ttk.Treeview(yarn_frame, columns=("name",), show="headings", height=5)
-        self.yarn_tree.heading("name", text="Yarn Type Name")
-        self.yarn_tree.pack(fill="both", expand=True, padx=5, pady=5)
+        # List
+        self.tree = ttk.Treeview(self, columns=("name", "type", "color"), show="headings", height=10)
+        self.tree.heading("name", text="Name")
+        self.tree.heading("type", text="Type")
+        self.tree.heading("color", text="Color")
+        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        ttk.Button(yarn_frame, text="Delete Selected", command=self.delete_yarn_type).pack(pady=5)
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=10)
+        ttk.Button(btns, text="Delete Selected", command=self.delete_selected).pack(side="left")
+        ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=8)
 
-        # Load data initially
+    def choose_color(self):
+        color = colorchooser.askcolor(title="Choose fabricator color")
+        if color and color[1]:
+            self.chosen_color = color[1]
+            self.color_btn.configure(text=self.chosen_color, background=self.chosen_color)
+
+    def add_or_update(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Missing", "Name required")
+            return
+        # map type label to key
+        type_label = self.type_cb.get()
+        type_map = {t[0]: t[1] for t in FAB_TYPES}
+        mtype = type_map.get(type_label, "yarn_supplier")
+        color_hex = getattr(self, "chosen_color", "")
+
+        db.add_master(name, mtype, color_hex)
+        db.update_master_color_and_type(name, mtype, color_hex)
+        messagebox.showinfo("Saved", f"{name} saved/updated.")
         self.load_suppliers()
-        self.load_yarn_types()
+        self.reload_cb_and_notify()
 
-    # -------- Suppliers --------
     def load_suppliers(self):
-        for row in self.suppliers_tree.get_children():
-            self.suppliers_tree.delete(row)
-
+        for r in self.tree.get_children():
+            self.tree.delete(r)
         conn = db.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT name FROM suppliers ORDER BY name")
-        for (name,) in cur.fetchall():
-            self.suppliers_tree.insert("", "end", values=(name,))
+        cur.execute("SELECT name, type, color_code FROM suppliers ORDER BY name")
+        for row in cur.fetchall():
+            type_label = next((t[0] for t in FAB_TYPES if t[1] == row["type"]), row["type"])
+            self.tree.insert("", "end", values=(row["name"], type_label, row["color_code"] or ""))
         conn.close()
 
-    def add_supplier(self):
-        name = self.supplier_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Warning", "Supplier name cannot be empty.")
+    def delete_selected(self):
+        sel = self.tree.selection()
+        if not sel:
             return
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO suppliers (name) VALUES (?)", (name,))
-        conn.commit()
-        conn.close()
-        self.supplier_entry.delete(0, tk.END)
-        self.load_suppliers()
+        name = self.tree.item(sel[0])["values"][0]
+        if messagebox.askyesno("Confirm", f"Delete {name}?"):
+            conn = db.get_connection()
+            cur = conn.cursor()
+            cur.execute("DELETE FROM suppliers WHERE name=?", (name,))
+            conn.commit()
+            conn.close()
+            self.load_suppliers()
+            self.reload_cb_and_notify()
 
-    def delete_supplier(self):
-        selected = self.suppliers_tree.selection()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a supplier to delete.")
+    def edit_selected(self):
+        sel = self.tree.selection()
+        if not sel:
             return
-        name = self.suppliers_tree.item(selected[0], "values")[0]
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM suppliers WHERE name=?", (name,))
-        conn.commit()
-        conn.close()
-        self.load_suppliers()
+        vals = self.tree.item(sel[0])["values"]
+        name, typelabel, color = vals
+        # prefill
+        self.name_entry.delete(0, tk.END)
+        self.name_entry.insert(0, name)
+        # set type combobox index
+        labels = [t[0] for t in FAB_TYPES]
+        try:
+            self.type_cb.current(labels.index(typelabel))
+        except Exception:
+            pass
+        self.chosen_color = color
+        self.color_btn.configure(text=color or "Choose", background=color or None)
 
-    # -------- Yarn Types --------
-    def load_yarn_types(self):
-        for row in self.yarn_tree.get_children():
-            self.yarn_tree.delete(row)
-
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM yarn_types ORDER BY name")
-        for (name,) in cur.fetchall():
-            self.yarn_tree.insert("", "end", values=(name,))
-        conn.close()
-
-    def add_yarn_type(self):
-        name = self.yarn_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Warning", "Yarn type cannot be empty.")
-            return
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO yarn_types (name) VALUES (?)", (name,))
-        conn.commit()
-        conn.close()
-        self.yarn_entry.delete(0, tk.END)
-        self.load_yarn_types()
-
-    def delete_yarn_type(self):
-        selected = self.yarn_tree.selection()
-        if not selected:
-            messagebox.showwarning("Warning", "Please select a yarn type to delete.")
-            return
-        name = self.yarn_tree.item(selected[0], "values")[0]
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM yarn_types WHERE name=?", (name,))
-        conn.commit()
-        conn.close()
-        self.load_yarn_types()
+    def reload_cb_and_notify(self):
+        # notify controller to rebuild fabricator tabs if provided
+        if self.on_change_callback:
+            self.on_change_callback()
