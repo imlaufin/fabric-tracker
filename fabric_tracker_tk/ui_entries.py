@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from . import db
+import db
 import datetime
 
 class EntryScreen(ttk.Frame):
