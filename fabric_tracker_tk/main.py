@@ -9,17 +9,21 @@ class FabricTrackerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Fabric Tracker (Tkinter Version)")
-        self.geometry("1200x700")  # little bigger for filters + tables
+        self.geometry("1200x700")  # more space for filters + tables
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        # Create frames
+        # Create frames with mutual references
         self.dashboard_frame = DashboardFrame(self.notebook, self)
-        self.entries_frame = EntriesFrame(self.notebook, self, dashboard_ref=self.dashboard_frame)
+        self.entries_frame = EntriesFrame(self.notebook, self)
         self.masters_frame = MastersFrame(self.notebook, self)
 
-        # Add tabs
+        # Give dashboard a reference to entries
+        self.dashboard_frame.controller = self
+        self.entries_frame.controller = self
+
+        # Add frames to notebook
         self.notebook.add(self.entries_frame, text="Entries")
         self.notebook.add(self.dashboard_frame, text="Dashboard")
         self.notebook.add(self.masters_frame, text="Masters")
