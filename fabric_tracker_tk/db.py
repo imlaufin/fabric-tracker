@@ -16,6 +16,12 @@ from datetime import datetime
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 
+DB_FILENAME = "db.sqlite"
+
+def get_db_path():
+    """Return the absolute path to the SQLite database file."""
+    return os.path.abspath(DB_FILENAME)
+    
 # -----------------------
 # Date helpers
 # -----------------------
