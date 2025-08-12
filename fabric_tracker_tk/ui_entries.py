@@ -42,6 +42,7 @@ class EntriesFrame(ttk.Frame):
         ttk.Label(form_frame, text="Delivered To:").grid(row=3, column=0, sticky="w")
         self.delivered_to_cb = ttk.Combobox(form_frame, width=20)
         self.delivered_to_cb.grid(row=3, column=1, sticky="w")
+        self.delivered_to_cb.bind("<Return>", lambda e: self.save_entry())  # Save on Enter
 
         save_btn = ttk.Button(form_frame, text="Save Entry", command=self.save_entry)
         save_btn.grid(row=4, column=0, columnspan=4, pady=10)
@@ -121,9 +122,13 @@ class EntriesFrame(ttk.Frame):
         self.load_entries()
         self.load_dropdown_options()
 
+        # Clear only quantity and batch fields for faster repeated entries
         self.qty_kg_entry.delete(0, tk.END)
         self.qty_rolls_entry.delete(0, tk.END)
         self.batch_entry.delete(0, tk.END)
+
+        # Focus back to Qty (kg) for next entry
+        self.qty_kg_entry.focus()
 
     def prefill_from_dashboard(self, delivered_to, yarn_type):
         """Called by Dashboard double-click to prefill fields."""
