@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'fabric_tracker_tk/**'
+      - 'requirements.txt'
 
 jobs:
   build:
@@ -11,10 +14,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -26,10 +29,10 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile fabric_tracker_tk/main.py
+          pyinstaller --onefile fabric_tracker_tk/main.py --name fabric_tracker
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fabric-tracker-windows
-          path: dist/main.exe
+          path: dist/fabric_tracker.exe
