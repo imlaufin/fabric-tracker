@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from . import db
+import db
 
 class SuppliersScreen(ttk.Frame):
     def __init__(self, parent, controller):
