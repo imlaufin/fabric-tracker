@@ -1,3 +1,4 @@
+# ui_entries.py
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import db
@@ -81,9 +82,7 @@ class EntriesFrame(ttk.Frame):
         cur.execute("SELECT name FROM suppliers ORDER BY name")
         masters = [r["name"] for r in cur.fetchall()]
 
-        # Delivered To must be from Masters
         self.delivered_cb["values"] = masters
-        # Supplier can be free text
         cur.execute("SELECT DISTINCT name FROM suppliers ORDER BY name")
         self.supplier_cb["values"] = [r["name"] for r in cur.fetchall()]
 
@@ -130,7 +129,6 @@ class EntriesFrame(ttk.Frame):
             messagebox.showwarning("Missing", "Please fill required fields")
             return
 
-        # Only Delivered To must be in masters
         if delivered not in self.delivered_cb["values"]:
             messagebox.showerror("Invalid Delivered To", f"'{delivered}' must be in Masters list")
             return
@@ -149,7 +147,6 @@ class EntriesFrame(ttk.Frame):
         self.clear_form()
         self.selected_purchase_id = None
 
-        # Update fabricators tab
         if self.controller and hasattr(self.controller, "fabricators_frame"):
             try:
                 self.controller.fabricators_frame.build_tabs()
