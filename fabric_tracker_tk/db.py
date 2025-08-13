@@ -1,4 +1,3 @@
-# db.py
 import sqlite3
 import os
 import shutil
@@ -8,13 +7,11 @@ DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 
-
 # ----------------------------
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
     return os.path.join(os.path.dirname(__file__), DB_PATH)
-
 
 def backup_db():
     if not os.path.exists(BACKUP_DIR):
@@ -23,7 +20,6 @@ def backup_db():
     dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
     if os.path.exists(get_db_path()):
         shutil.copy2(get_db_path(), dest)
-
     backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("fabric_backup_")])
     while len(backups) > MAX_BACKUPS:
         old_backup = backups.pop(0)
@@ -33,6 +29,9 @@ def backup_db():
             pass
     return dest
 
+def restore_backup(path):
+    if os.path.exists(path):
+        shutil.copy2(path, get_db_path())
 
 # ----------------------------
 # Database Connection
@@ -42,7 +41,6 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
-
 
 # ----------------------------
 # DB Initialization / Migrations
@@ -70,6 +68,12 @@ def init_db():
     """)
     cur.execute("""
     CREATE TABLE IF NOT EXISTS yarn_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fabric_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE
     )
@@ -131,12 +135,13 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_suppliers_type ON suppliers(type)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_yarn_types_name ON yarn_types(name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_fabric_types_name ON fabric_types(name)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_lots_lot_no ON lots(lot_no)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_lot_no ON purchases(lot_no)")
 
     conn.commit()
 
-    # Default suppliers
+    # Default suppliers / units
     for unit_name, unit_type in [
         ("Default Knitting Unit", "knitting_unit"),
         ("Default Dyeing Unit", "dyeing_unit")
@@ -146,9 +151,7 @@ def init_db():
             cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
     conn.commit()
     conn.close()
-
     print("[DB] New DB created and initialized." if created else "[DB] DB init/migrations complete.")
-
 
 # ----------------------------
 # Date Helpers
@@ -158,7 +161,6 @@ def db_to_ui_date(db_date: str) -> str:
         return ""
     dt = datetime.strptime(db_date, "%Y-%m-%d")
     return dt.strftime("%d/%m/%Y")
-
 
 def ui_to_db_date(ui_date: str) -> str:
     if not ui_date:
@@ -183,13 +185,11 @@ def ui_to_db_date(ui_date: str) -> str:
     except Exception as e:
         raise ValueError(f"Invalid date '{ui_date}': {e}")
 
-
 # ----------------------------
 # LIKE Helper
 # ----------------------------
 def _escape_like(s: str) -> str:
     return s.replace("%", r"\%").replace("_", r"\_")
-
 
 # ----------------------------
 # Supplier / Masters
@@ -204,7 +204,6 @@ def list_suppliers(supplier_type=None):
     rows = cur.fetchall()
     conn.close()
     return rows
-
 
 def search_suppliers_prefix(prefix: str, supplier_type: str = None, limit: int = 20):
     prefix = (prefix or "").strip()
@@ -227,7 +226,6 @@ def search_suppliers_prefix(prefix: str, supplier_type: str = None, limit: int =
     conn.close()
     return rows
 
-
 def add_master(name, mtype="yarn_supplier", color_code=""):
     if not name or not name.strip():
         return
@@ -239,13 +237,11 @@ def add_master(name, mtype="yarn_supplier", color_code=""):
     conn.commit()
     conn.close()
 
-
 def update_master_color_and_type(name, mtype, color_hex):
     conn = get_connection()
     conn.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
     conn.commit()
     conn.close()
-
 
 def delete_master_by_name(name: str):
     """
@@ -277,7 +273,6 @@ def delete_master_by_name(name: str):
     conn.close()
     return True
 
-
 def get_supplier_id_by_name(name: str, required_type: str = None):
     if not name or not name.strip():
         return None
@@ -291,7 +286,6 @@ def get_supplier_id_by_name(name: str, required_type: str = None):
     conn.close()
     return row["id"] if row else None
 
-
 def is_delivered_to_valid(name):
     if not name or not name.strip():
         return False
@@ -299,7 +293,6 @@ def is_delivered_to_valid(name):
     exists = conn.execute("SELECT 1 FROM suppliers WHERE name=? LIMIT 1", (name.strip(),)).fetchone() is not None
     conn.close()
     return exists
-
 
 # ----------------------------
 # Yarn Types
@@ -310,7 +303,6 @@ def list_yarn_types():
     conn.close()
     return rows
 
-
 def add_yarn_type(name: str):
     if not name or not name.strip():
         return
@@ -318,7 +310,6 @@ def add_yarn_type(name: str):
     conn.execute("INSERT OR IGNORE INTO yarn_types (name) VALUES (?)", (name.strip(),))
     conn.commit()
     conn.close()
-
 
 def search_yarn_types_prefix(prefix: str, limit: int = 20):
     prefix = (prefix or "").strip()
@@ -330,6 +321,32 @@ def search_yarn_types_prefix(prefix: str, limit: int = 20):
     conn.close()
     return rows
 
+# ----------------------------
+# Fabric Types
+# ----------------------------
+def list_fabric_types():
+    conn = get_connection()
+    rows = [r["name"] for r in conn.execute("SELECT DISTINCT name FROM fabric_types ORDER BY name").fetchall()]
+    conn.close()
+    return rows
+
+def add_fabric_type(name: str):
+    if not name or not name.strip():
+        return
+    conn = get_connection()
+    conn.execute("INSERT OR IGNORE INTO fabric_types (name) VALUES (?)", (name.strip(),))
+    conn.commit()
+    conn.close()
+
+def search_fabric_types_prefix(prefix: str, limit: int = 20):
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
+    conn = get_connection()
+    rows = [r["name"] for r in conn.execute(
+        r"SELECT name FROM fabric_types WHERE name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?", (like, limit)
+    ).fetchall()]
+    conn.close()
+    return rows
 
 # ----------------------------
 # Fabricators / Batches / Lots
@@ -340,13 +357,11 @@ def get_fabricators(fab_type):
     conn.close()
     return rows
 
-
 def get_batches_for_fabricator(fabricator_id):
     conn = get_connection()
     rows = conn.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (fabricator_id,)).fetchall()
     conn.close()
     return rows
-
 
 def search_batches_prefix(prefix: str, limit: int = 20):
     prefix = (prefix or "").strip()
@@ -357,7 +372,6 @@ def search_batches_prefix(prefix: str, limit: int = 20):
     ).fetchall()]
     conn.close()
     return rows
-
 
 def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composition=""):
     conn = get_connection()
@@ -373,7 +387,6 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
     conn.close()
     return bid
 
-
 def create_lot(batch_id, lot_index):
     conn = get_connection()
     cur = conn.cursor()
@@ -385,7 +398,6 @@ def create_lot(batch_id, lot_index):
     conn.close()
     return lid
 
-
 def get_lot_id_by_no(lot_no: str):
     if not lot_no or not lot_no.strip():
         return None
@@ -393,7 +405,6 @@ def get_lot_id_by_no(lot_no: str):
     row = conn.execute("SELECT id FROM lots WHERE lot_no=? LIMIT 1", (lot_no.strip(),)).fetchone()
     conn.close()
     return row["id"] if row else None
-
 
 def search_lots_prefix(prefix: str, limit: int = 20):
     prefix = (prefix or "").strip()
@@ -404,7 +415,6 @@ def search_lots_prefix(prefix: str, limit: int = 20):
     ).fetchall()]
     conn.close()
     return rows
-
 
 # ----------------------------
 # Purchases / Dyeing Outputs
@@ -421,7 +431,6 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     conn.commit()
     conn.close()
 
-
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
                   price_per_unit, delivered_to, notes=""):
     if not is_delivered_to_valid(delivered_to):
@@ -435,13 +444,11 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
     conn.commit()
     conn.close()
 
-
 def delete_purchase(purchase_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
     conn.commit()
     conn.close()
-
 
 def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
     resolved_lot_id = None
@@ -462,13 +469,11 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
     conn.commit()
     conn.close()
 
-
 def delete_dyeing_output(dyeing_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
     conn.commit()
     conn.close()
-
 
 # ----------------------------
 # Autocomplete (Delivered-To)
