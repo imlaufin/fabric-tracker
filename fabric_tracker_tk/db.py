@@ -11,20 +11,16 @@ MAX_BACKUPS = 5  # keep only latest 5 backups
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
-    """Return full path to the SQLite database."""
     return os.path.join(os.path.dirname(__file__), DB_PATH)
 
 def backup_db():
-    """Create a timestamped backup of the DB and keep only last 5 backups."""
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
-
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
     if os.path.exists(get_db_path()):
         shutil.copy2(get_db_path(), dest)
 
-    # Clean old backups if more than MAX_BACKUPS
     backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("fabric_backup_")])
     while len(backups) > MAX_BACKUPS:
         old_backup = backups.pop(0)
@@ -32,7 +28,6 @@ def backup_db():
             os.remove(os.path.join(BACKUP_DIR, old_backup))
         except Exception:
             pass
-
     return dest
 
 # ----------------------------
@@ -88,12 +83,10 @@ def init_db():
         notes TEXT
     )
     """)
-
-    # Batches and lots
     cur.execute("""
     CREATE TABLE IF NOT EXISTS batches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        batch_ref TEXT,
+        batch_ref TEXT UNIQUE,
         fabricator_id INTEGER,
         product_name TEXT,
         expected_lots INTEGER DEFAULT 0,
@@ -106,14 +99,12 @@ def init_db():
     CREATE TABLE IF NOT EXISTS lots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_id INTEGER,
-        lot_no TEXT,
+        lot_no TEXT UNIQUE,
         lot_index INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
     """)
-
-    # Dyeing outputs
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dyeing_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,14 +119,13 @@ def init_db():
     )
     """)
 
-    # Index hints
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
 
     conn.commit()
 
-    # Add default knitting and dyeing units if not present
+    # Add default knitting and dyeing units
     for unit_name, unit_type in [("Default Knitting Unit", "knitting_unit"), ("Default Dyeing Unit", "dyeing_unit")]:
         cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
         if not cur.fetchone():
@@ -162,7 +152,6 @@ def ui_to_db_date(ui_date: str) -> str:
         return ""
     ui_date = ui_date.replace("-", "/").strip()
     parts = ui_date.split("/")
-    day, month, year = 0, 0, 0
     try:
         if len(parts) == 2:
             day, month = int(parts[0]), int(parts[1])
@@ -183,7 +172,7 @@ def ui_to_db_date(ui_date: str) -> str:
         raise ValueError(f"Invalid date '{ui_date}': {e}")
 
 # ----------------------------
-# Supplier / Masters Handling
+# Supplier / Masters
 # ----------------------------
 def list_suppliers(supplier_type=None):
     conn = get_connection()
@@ -197,7 +186,6 @@ def list_suppliers(supplier_type=None):
     return rows
 
 def add_master(name, mtype="yarn_supplier", color_code=""):
-    """Add a master (supplier/fabricator) to the DB. If exists, ignore."""
     if not name.strip():
         return
     conn = get_connection()
@@ -214,7 +202,6 @@ def update_master_color_and_type(name, mtype, color_hex):
     conn.close()
 
 def is_delivered_to_valid(name):
-    """Return True if delivered_to exists in suppliers table."""
     if not name.strip():
         return False
     conn = get_connection()
@@ -262,6 +249,10 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
         VALUES (?, ?, ?, ?, ?)
     """, (batch_ref, fabricator_id, product_name, expected_lots, composition))
     bid = cur.lastrowid
+
+    # Auto-create lots
+    for i in range(1, expected_lots+1):
+        create_lot(bid, i)
     conn.commit()
     conn.close()
     return bid
@@ -283,7 +274,6 @@ def create_lot(batch_id, lot_index):
 # Purchases / Dyeing Outputs
 # ----------------------------
 def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit=0, delivered_to="", notes=""):
-    """Add a new purchase. delivered_to must exist in masters, supplier can be any text."""
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
@@ -297,7 +287,6 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     conn.close()
 
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes=""):
-    """Edit existing purchase by id. delivered_to must exist in masters."""
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
