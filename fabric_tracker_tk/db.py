@@ -5,6 +5,7 @@ from datetime import datetime
 
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
+MAX_BACKUPS = 5  # keep only latest 5 backups
 
 # ----------------------------
 # Backup / Restore Utilities
@@ -14,13 +15,24 @@ def get_db_path():
     return os.path.join(os.path.dirname(__file__), DB_PATH)
 
 def backup_db():
-    """Create a timestamped backup of the DB."""
+    """Create a timestamped backup of the DB and keep only last 5 backups."""
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
     if os.path.exists(get_db_path()):
         shutil.copy2(get_db_path(), dest)
+
+    # Clean old backups if more than MAX_BACKUPS
+    backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("fabric_backup_")])
+    while len(backups) > MAX_BACKUPS:
+        old_backup = backups.pop(0)
+        try:
+            os.remove(os.path.join(BACKUP_DIR, old_backup))
+        except Exception:
+            pass
+
     return dest
 
 # ----------------------------
