@@ -1,4 +1,3 @@
-# db.py
 import sqlite3
 import os
 import shutil
@@ -121,6 +120,13 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
 
     conn.commit()
+
+    # Add default knitting and dyeing units if not present
+    for unit_name, unit_type in [("Default Knitting Unit", "knitting_unit"), ("Default Dyeing Unit", "dyeing_unit")]:
+        cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
+        if not cur.fetchone():
+            cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
+    conn.commit()
     conn.close()
 
     if created:
@@ -132,14 +138,12 @@ def init_db():
 # Date Conversion Helpers
 # ----------------------------
 def db_to_ui_date(db_date: str) -> str:
-    """Convert DB date (yyyy-mm-dd) to UI date (dd/mm/yyyy)."""
     if not db_date:
         return ""
     dt = datetime.strptime(db_date, "%Y-%m-%d")
     return dt.strftime("%d/%m/%Y")
 
 def ui_to_db_date(ui_date: str) -> str:
-    """Convert flexible UI date (d/m/yy or d-m-yy or d/m or d-m) to DB date (yyyy-mm-dd)."""
     if not ui_date:
         return ""
     ui_date = ui_date.replace("-", "/").strip()
@@ -151,11 +155,11 @@ def ui_to_db_date(ui_date: str) -> str:
             year = datetime.now().year
         elif len(parts) == 3:
             day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
-            if year < 100:  # two-digit year
+            if year < 100:
                 current_year = datetime.now().year
                 century = current_year // 100
                 year += century * 100
-                if year > current_year + 20:  # if in future by too much, assume previous century
+                if year > current_year + 20:
                     year -= 100
         else:
             raise ValueError(f"Cannot parse date: {ui_date}")
