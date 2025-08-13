@@ -50,7 +50,13 @@ class MastersFrame(ttk.Frame):
         color = colorchooser.askcolor(title="Choose fabricator color")
         if color and color[1]:
             self.chosen_color = color[1]
-            self.color_btn.configure(text=self.chosen_color, background=self.chosen_color)
+            # Update button text
+            self.color_btn.configure(text=self.chosen_color)
+            # Apply color using style
+            style_name = f"Color.TButton.{self.chosen_color}"
+            s = ttk.Style()
+            s.configure(style_name, background=self.chosen_color)
+            self.color_btn.configure(style=style_name)
 
     def add_or_update(self):
         name = self.name_entry.get().strip()
@@ -71,7 +77,7 @@ class MastersFrame(ttk.Frame):
         self.name_entry.delete(0, tk.END)
         self.type_cb.current(0)
         self.chosen_color = ""
-        self.color_btn.configure(text="Choose", background=None)
+        self.color_btn.configure(text="Choose", style="TButton")
 
         self.load_suppliers()
         self.reload_cb_and_notify()
@@ -118,7 +124,7 @@ class MastersFrame(ttk.Frame):
             self.type_cb.current(0)
 
         self.chosen_color = color or ""
-        self.color_btn.configure(text=color or "Choose", background=color or None)
+        self.color_btn.configure(text=color or "Choose", style="TButton")
 
     def reload_cb_and_notify(self):
         # Notify controller to rebuild fabricator tabs if provided
