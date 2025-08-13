@@ -7,6 +7,7 @@ from ui_entries import EntriesFrame
 from ui_masters import MastersFrame
 from ui_fabricators import FabricatorsFrame
 from reports import ReportsFrame
+from backup_restore import BackupRestoreFrame  # <-- backup/restore UI
 
 class FabricTrackerApp(tk.Tk):
     def __init__(self):
@@ -21,18 +22,18 @@ class FabricTrackerApp(tk.Tk):
         # create frames
         self.dashboard_frame = DashboardFrame(self.notebook, self)
         self.entries_frame = EntriesFrame(self.notebook, self)
-        # fabricators frame will be created and it will generate sub-tabs for knitting/dyeing
         self.fabricators_frame = FabricatorsFrame(self.notebook, controller=self)
-        # masters: pass callback to rebuild fabricator tabs when masters change
         self.masters_frame = MastersFrame(self.notebook, controller=self, on_change_callback=self.reload_fabricators)
         self.reports_frame = ReportsFrame(self.notebook, self)
+        self.backup_frame = BackupRestoreFrame(self.notebook, self)  # <-- backup/restore tab
 
-        # add to notebook
+        # add frames to notebook
         self.notebook.add(self.entries_frame, text="Entries")
         self.notebook.add(self.dashboard_frame, text="Dashboard")
         self.notebook.add(self.fabricators_frame, text="Fabricators")
         self.notebook.add(self.masters_frame, text="Masters")
         self.notebook.add(self.reports_frame, text="Reports")
+        self.notebook.add(self.backup_frame, text="Backup / Restore")  # <-- add backup tab
 
     def reload_fabricators(self):
         # called when Masters change
