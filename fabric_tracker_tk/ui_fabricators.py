@@ -1,3 +1,4 @@
+# ui_fabricators.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 import db
@@ -13,7 +14,6 @@ def pastel_tint(hex_color, factor=0.85):
     r = int(hex_color[0:2], 16)
     g = int(hex_color[2:4], 16)
     b = int(hex_color[4:6], 16)
-    # mix towards white
     r = int(r + (255 - r) * (1 - factor))
     g = int(g + (255 - g) * (1 - factor))
     b = int(b + (255 - b) * (1 - factor))
@@ -30,7 +30,6 @@ class KnittingTab(ttk.Frame):
     def build_ui(self):
         top = ttk.Frame(self)
         top.pack(fill="x", padx=6, pady=6)
-
         ttk.Label(top, text=f"Knitting Unit: {self.fabricator['name']}", font=("Arial", 12, "bold")).pack(side="left")
         ttk.Button(top, text="New Batch", command=self.create_batch_dialog).pack(side="right", padx=4)
         ttk.Button(top, text="Refresh", command=self.reload_all).pack(side="right", padx=4)
@@ -38,7 +37,6 @@ class KnittingTab(ttk.Frame):
         # Inward Transactions
         tx_frame = ttk.LabelFrame(self, text="Inward Transactions (Yarn received)")
         tx_frame.pack(fill="both", expand=True, padx=6, pady=6)
-
         cols = ("date", "supplier", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
         self.tx_tree = ttk.Treeview(tx_frame, columns=cols, show="headings", height=8)
         for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Supplier","Type","Kg","Rolls","Batch","Lot"]):
@@ -81,8 +79,7 @@ class KnittingTab(ttk.Frame):
             WHERE delivered_to=? ORDER BY date DESC
         """, (self.fabricator["name"],))
         for row in cur.fetchall():
-            ui_date = db.db_to_ui_date(row["date"])
-            self.tx_tree.insert("", "end", values=(ui_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
+            self.tx_tree.insert("", "end", values=(row["date"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
         conn.close()
 
     def load_batches(self):
@@ -156,7 +153,6 @@ class KnittingTab(ttk.Frame):
             self.summary_tree.insert("", "end", values=(r["yarn_type"], r["kg_sum"] or 0, r["rolls_sum"] or 0))
         conn.close()
 
-
 class DyeingTab(ttk.Frame):
     def __init__(self, parent, fabricator_row, controller=None):
         super().__init__(parent)
@@ -224,8 +220,7 @@ class DyeingTab(ttk.Frame):
             short_kg = orig_kg - rkg
             short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
             tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
-            ui_batch = db.db_to_ui_date(batch_ref) if '-' in batch_ref else batch_ref
-            self.pending_tree.insert("", "end", values=(ui_batch, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+            self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.pending_tree.tag_configure("short", background="#ffcccc")
         conn.close()
 
@@ -259,16 +254,15 @@ class DyeingTab(ttk.Frame):
                 short_kg = orig_kg - rkg
                 short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
                 tag = "short" if short_pct>SHORTAGE_THRESHOLD_PERCENT else ""
-                ui_batch = db.db_to_ui_date(batch_ref) if '-' in batch_ref else batch_ref
-                self.completed_tree.insert("", "end", values=(ui_batch, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.completed_tree.tag_configure("short", background="#ffcccc")
         conn.close()
-
 
 class FabricatorsFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
         super().__init__(parent)
         self.controller = controller
+        self.tabs_map = {}  # map from fabricator name to tab instance
         self.build_ui()
         self.build_tabs()
 
@@ -283,8 +277,36 @@ class FabricatorsFrame(ttk.Frame):
     def build_tabs(self):
         # Clear previous tabs
         for child in self.parent_nb.winfo_children():
-            child.destroy()
+            self.parent_nb.forget(child)
+        self.tabs_map.clear()
 
-        # Knitting and Dyeing parent tabs
-        kn_tab = ttk.Frame(self.parent_nb)
-        self.parent_nb.add(kn_tab, text="Knitting Units")
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM suppliers ORDER BY name")
+        fabricators = cur.fetchall()
+        conn.close()
+
+        for fab in fabricators:
+            if fab["type"] == "knitting":
+                tab = KnittingTab(self.parent_nb, fab, controller=self)
+                self.parent_nb.add(tab, text=fab["name"])
+                self.tabs_map[fab["name"]] = tab
+
+        for fab in fabricators:
+            if fab["type"] == "dyeing":
+                tab = DyeingTab(self.parent_nb, fab, controller=self)
+                self.parent_nb.add(tab, text=fab["name"])
+                self.tabs_map[fab["name"]] = tab
+
+    def open_dyeing_tab_for_batch(self, dyeing_unit_name, batch_ref):
+        tab = self.tabs_map.get(dyeing_unit_name)
+        if not tab:
+            messagebox.showwarning("Not found", f"Dyeing unit '{dyeing_unit_name}' tab not found")
+            return
+        self.parent_nb.select(tab)
+        for iid in tab.pending_tree.get_children():
+            vals = tab.pending_tree.item(iid)["values"]
+            if vals[0] == batch_ref:
+                tab.pending_tree.selection_set(iid)
+                tab.pending_tree.see(iid)
+                break
