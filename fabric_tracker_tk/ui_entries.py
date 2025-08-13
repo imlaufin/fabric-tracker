@@ -16,26 +16,37 @@ class EntriesFrame(ttk.Frame):
         frm.pack(fill="x", padx=8, pady=8)
 
         ttk.Label(frm, text="Date").grid(row=0, column=0)
-        self.date_e = ttk.Entry(frm, width=12); self.date_e.grid(row=0, column=1); self.date_e.insert(0, datetime.today().strftime("%Y-%m-%d"))
+        self.date_e = ttk.Entry(frm, width=12)
+        self.date_e.grid(row=0, column=1)
+        # show today's date in dd/mm/yyyy format
+        self.date_e.insert(0, datetime.today().strftime("%d/%m/%Y"))
+
         ttk.Label(frm, text="Batch ID").grid(row=0, column=2)
-        self.batch_e = ttk.Entry(frm, width=12); self.batch_e.grid(row=0, column=3)
+        self.batch_e = ttk.Entry(frm, width=12)
+        self.batch_e.grid(row=0, column=3)
 
         ttk.Label(frm, text="Lot No (optional)").grid(row=0, column=4)
-        self.lot_e = ttk.Entry(frm, width=12); self.lot_e.grid(row=0, column=5)
+        self.lot_e = ttk.Entry(frm, width=12)
+        self.lot_e.grid(row=0, column=5)
 
         ttk.Label(frm, text="Supplier").grid(row=1, column=0)
-        self.supplier_cb = ttk.Combobox(frm, width=25); self.supplier_cb.grid(row=1, column=1)
+        self.supplier_cb = ttk.Combobox(frm, width=25)
+        self.supplier_cb.grid(row=1, column=1)
 
         ttk.Label(frm, text="Yarn Type").grid(row=1, column=2)
-        self.yarn_cb = ttk.Combobox(frm, width=25); self.yarn_cb.grid(row=1, column=3)
+        self.yarn_cb = ttk.Combobox(frm, width=25)
+        self.yarn_cb.grid(row=1, column=3)
 
         ttk.Label(frm, text="Qty (kg)").grid(row=2, column=0)
-        self.kg_e = ttk.Entry(frm, width=12); self.kg_e.grid(row=2, column=1)
+        self.kg_e = ttk.Entry(frm, width=12)
+        self.kg_e.grid(row=2, column=1)
         ttk.Label(frm, text="Qty (rolls)").grid(row=2, column=2)
-        self.rolls_e = ttk.Entry(frm, width=12); self.rolls_e.grid(row=2, column=3)
+        self.rolls_e = ttk.Entry(frm, width=12)
+        self.rolls_e.grid(row=2, column=3)
 
         ttk.Label(frm, text="Delivered To").grid(row=3, column=0)
-        self.delivered_cb = ttk.Combobox(frm, width=25); self.delivered_cb.grid(row=3, column=1)
+        self.delivered_cb = ttk.Combobox(frm, width=25)
+        self.delivered_cb.grid(row=3, column=1)
 
         ttk.Button(frm, text="Save", command=self.save).grid(row=4, column=0, pady=8)
         ttk.Button(frm, text="Clear", command=self.clear_form).grid(row=4, column=1)
@@ -56,7 +67,6 @@ class EntriesFrame(ttk.Frame):
         self.delivered_cb.bind("<Return>", lambda e: self.save())
 
     def refresh_lists(self):
-        # suppliers for comboboxes including masters and existing used suppliers
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT name FROM suppliers ORDER BY name")
@@ -83,7 +93,9 @@ class EntriesFrame(ttk.Frame):
         cur = conn.cursor()
         cur.execute("SELECT date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to FROM purchases ORDER BY date DESC")
         for row in cur.fetchall():
-            self.tree.insert("", "end", values=(row["date"], row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["delivered_to"]))
+            # display date in dd/mm/yyyy
+            display_date = db.db_to_ui_date(row["date"])
+            self.tree.insert("", "end", values=(display_date, row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["delivered_to"]))
         conn.close()
 
     def save(self):
@@ -107,20 +119,23 @@ class EntriesFrame(ttk.Frame):
             messagebox.showwarning("Missing", "Please fill required fields")
             return
 
-        # Record in purchases table
-        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, delivered, notes="")
-        # refresh lists and entries
+        # Record in purchases table using flexible date parser
+        try:
+            db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, delivered, notes="")
+        except ValueError as e:
+            messagebox.showerror("Invalid Date", str(e))
+            return
+
         self.refresh_lists()
         self.reload_entries()
 
-        # keep delivered and yarn filled but clear batch/quantities for quick repeated entry
+        # clear batch/lot/quantities for quick repeated entry
         self.kg_e.delete(0, tk.END)
         self.rolls_e.delete(0, tk.END)
         self.batch_e.delete(0, tk.END)
         self.lot_e.delete(0, tk.END)
         self.kg_e.focus()
 
-        # If controller provided and has knitting/dyeing tabs, reload relevant tabs
         if self.controller and hasattr(self.controller, "fabricators_frame"):
             try:
                 self.controller.fabricators_frame.build_tabs()
@@ -138,16 +153,13 @@ class EntriesFrame(ttk.Frame):
         if not batch_ref:
             messagebox.showwarning("Batch required", "Enter the batch id first (temporary allowed).")
             return
-        # find batch id in DB or ask to create
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT id, expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
         row = cur.fetchone()
         if not row:
             if messagebox.askyesno("Batch not found", "Batch not found. Create new batch entry?"):
-                # create batch with zero expected lots initially
                 fabricator_name = self.delivered_cb.get().strip()
-                # find fabricator id
                 cur.execute("SELECT id FROM suppliers WHERE name=?", (fabricator_name,))
                 fr = cur.fetchone()
                 fid = fr["id"] if fr else None
@@ -157,7 +169,6 @@ class EntriesFrame(ttk.Frame):
                 return
         else:
             b_id = row["id"]
-        # ask how many lots to create or index
         try:
             lots = int(simpledialog.askstring("Lots", "How many lots to create?", parent=self) or "0")
         except Exception:
@@ -165,8 +176,6 @@ class EntriesFrame(ttk.Frame):
         if lots <= 0:
             conn.close()
             return
-        # create sequential lots
-        # find current max index
         cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
         maxidx = cur.fetchone()["maxidx"] or 0
         for i in range(1, lots+1):
