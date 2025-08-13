@@ -1,4 +1,3 @@
-# ui_fabricators.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 import db
@@ -82,7 +81,8 @@ class KnittingTab(ttk.Frame):
             WHERE delivered_to=? ORDER BY date DESC
         """, (self.fabricator["name"],))
         for row in cur.fetchall():
-            self.tx_tree.insert("", "end", values=(row["date"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
+            ui_date = db.db_to_ui_date(row["date"])
+            self.tx_tree.insert("", "end", values=(ui_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
         conn.close()
 
     def load_batches(self):
@@ -156,6 +156,7 @@ class KnittingTab(ttk.Frame):
             self.summary_tree.insert("", "end", values=(r["yarn_type"], r["kg_sum"] or 0, r["rolls_sum"] or 0))
         conn.close()
 
+
 class DyeingTab(ttk.Frame):
     def __init__(self, parent, fabricator_row, controller=None):
         super().__init__(parent)
@@ -223,7 +224,8 @@ class DyeingTab(ttk.Frame):
             short_kg = orig_kg - rkg
             short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
             tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
-            self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+            ui_batch = db.db_to_ui_date(batch_ref) if '-' in batch_ref else batch_ref
+            self.pending_tree.insert("", "end", values=(ui_batch, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.pending_tree.tag_configure("short", background="#ffcccc")
         conn.close()
 
@@ -257,9 +259,11 @@ class DyeingTab(ttk.Frame):
                 short_kg = orig_kg - rkg
                 short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
                 tag = "short" if short_pct>SHORTAGE_THRESHOLD_PERCENT else ""
-                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+                ui_batch = db.db_to_ui_date(batch_ref) if '-' in batch_ref else batch_ref
+                self.completed_tree.insert("", "end", values=(ui_batch, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.completed_tree.tag_configure("short", background="#ffcccc")
         conn.close()
+
 
 class FabricatorsFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
