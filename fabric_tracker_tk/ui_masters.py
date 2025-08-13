@@ -3,7 +3,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox, colorchooser
 import db
 
-FAB_TYPES = [("Yarn Supplier", "yarn_supplier"), ("Knitting Unit", "knitting_unit"), ("Dyeing Unit", "dyeing_unit")]
+MASTER_TYPES = [
+    ("Yarn Supplier", "yarn_supplier"),
+    ("Knitting Unit", "knitting_unit"),
+    ("Dyeing Unit", "dyeing_unit"),
+    ("Yarn Type", "yarn_type"),
+    ("Fabric Type", "fabric_type")  # future-proof
+]
 
 class MastersFrame(ttk.Frame):
     def __init__(self, parent, controller=None, on_change_callback=None):
@@ -12,7 +18,7 @@ class MastersFrame(ttk.Frame):
         self.on_change_callback = on_change_callback
         self.chosen_color = ""
         self.build_ui()
-        self.load_suppliers()
+        self.load_masters()
 
     def build_ui(self):
         top = ttk.Frame(self)
@@ -23,7 +29,7 @@ class MastersFrame(ttk.Frame):
         self.name_entry.grid(row=0, column=1, padx=5)
 
         ttk.Label(top, text="Type:").grid(row=0, column=2, sticky="w")
-        self.type_cb = ttk.Combobox(top, values=[t[0] for t in FAB_TYPES], state="readonly", width=18)
+        self.type_cb = ttk.Combobox(top, values=[t[0] for t in MASTER_TYPES], state="readonly", width=18)
         self.type_cb.grid(row=0, column=3, padx=5)
         self.type_cb.current(0)
 
@@ -32,9 +38,9 @@ class MastersFrame(ttk.Frame):
         self.color_btn.grid(row=0, column=5, padx=5)
 
         ttk.Button(top, text="Add / Update", command=self.add_or_update).grid(row=0, column=6, padx=8)
-        ttk.Button(top, text="Reload Fabricators", command=self.reload_cb_and_notify).grid(row=0, column=7, padx=8)
+        ttk.Button(top, text="Reload Masters", command=self.reload_cb_and_notify).grid(row=0, column=7, padx=8)
 
-        # Treeview for list of masters
+        # Treeview
         self.tree = ttk.Treeview(self, columns=("name", "type", "color"), show="headings", height=10)
         self.tree.heading("name", text="Name")
         self.tree.heading("type", text="Type")
@@ -47,12 +53,10 @@ class MastersFrame(ttk.Frame):
         ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=8)
 
     def choose_color(self):
-        color = colorchooser.askcolor(title="Choose fabricator color")
+        color = colorchooser.askcolor(title="Choose supplier color")
         if color and color[1]:
             self.chosen_color = color[1]
-            # Update button text
             self.color_btn.configure(text=self.chosen_color)
-            # Apply color using style
             style_name = f"Color.TButton.{self.chosen_color}"
             s = ttk.Style()
             s.configure(style_name, background=self.chosen_color)
@@ -65,46 +69,63 @@ class MastersFrame(ttk.Frame):
             return
 
         type_label = self.type_cb.get()
-        type_map = {t[0]: t[1] for t in FAB_TYPES}
+        type_map = {t[0]: t[1] for t in MASTER_TYPES}
         mtype = type_map.get(type_label, "yarn_supplier")
         color_hex = getattr(self, "chosen_color", "")
 
-        db.add_master(name, mtype, color_hex)
-        db.update_master_color_and_type(name, mtype, color_hex)
+        # Add/update based on type
+        if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
+            db.add_master(name, mtype, color_hex)
+            db.update_master_color_and_type(name, mtype, color_hex)
+        elif mtype == "yarn_type":
+            db.add_yarn_type(name)
+        elif mtype == "fabric_type":
+            # Future-proof: use add_master with type 'fabric_type'
+            db.add_master(name, mtype, "")
+
         messagebox.showinfo("Saved", f"{name} saved/updated.")
 
-        # Reset form for next entry
+        # Reset form
         self.name_entry.delete(0, tk.END)
         self.type_cb.current(0)
         self.chosen_color = ""
         self.color_btn.configure(text="Choose", style="TButton")
 
-        self.load_suppliers()
+        self.load_masters()
         self.reload_cb_and_notify()
 
-    def load_suppliers(self):
+    def load_masters(self):
         for r in self.tree.get_children():
             self.tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT name, type, color_code FROM suppliers ORDER BY name")
-        for row in cur.fetchall():
-            type_label = next((t[0] for t in FAB_TYPES if t[1] == row["type"]), row["type"])
-            self.tree.insert("", "end", values=(row["name"], type_label, row["color_code"] or ""))
-        conn.close()
+        # Load suppliers
+        for t in MASTER_TYPES:
+            mtype = t[1]
+            if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit", "fabric_type"):
+                rows = db.list_suppliers(mtype if mtype != "fabric_type" else None)
+                for row in rows:
+                    type_label = next((t[0] for t in MASTER_TYPES if t[1] == row["type"]), row["type"])
+                    color = row.get("color_code", "") if "color_code" in row.keys() else ""
+                    self.tree.insert("", "end", values=(row["name"], type_label, color))
+            elif mtype == "yarn_type":
+                rows = db.list_yarn_types()
+                for yname in rows:
+                    self.tree.insert("", "end", values=(yname, t[0], ""))
 
     def delete_selected(self):
         sel = self.tree.selection()
         if not sel:
             return
-        name = self.tree.item(sel[0])["values"][0]
+        name, typelabel, _ = self.tree.item(sel[0])["values"]
+        type_map = {t[0]: t[1] for t in MASTER_TYPES}
+        mtype = type_map.get(typelabel, None)
+        if not mtype:
+            return
+
         if messagebox.askyesno("Confirm", f"Delete {name}?"):
-            conn = db.get_connection()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM suppliers WHERE name=?", (name,))
-            conn.commit()
-            conn.close()
-            self.load_suppliers()
+            success = db.delete_master_by_name(name)
+            if not success:
+                messagebox.showwarning("Cannot Delete", f"{name} cannot be deleted (maybe in use or default).")
+            self.load_masters()
             self.reload_cb_and_notify()
 
     def edit_selected(self):
@@ -113,20 +134,25 @@ class MastersFrame(ttk.Frame):
             return
         vals = self.tree.item(sel[0])["values"]
         name, typelabel, color = vals
-        # prefill form
+
+        # Prefill form
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
 
-        labels = [t[0] for t in FAB_TYPES]
+        labels = [t[0] for t in MASTER_TYPES]
         try:
             self.type_cb.current(labels.index(typelabel))
         except Exception:
             self.type_cb.current(0)
 
-        self.chosen_color = color or ""
-        self.color_btn.configure(text=color or "Choose", style="TButton")
+        # Color only for suppliers
+        if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
+            self.chosen_color = color or ""
+            self.color_btn.configure(text=color or "Choose", style="TButton")
+        else:
+            self.chosen_color = ""
+            self.color_btn.configure(text="Choose", style="TButton")
 
     def reload_cb_and_notify(self):
-        # Notify controller to rebuild fabricator tabs if provided
         if self.on_change_callback:
             self.on_change_callback()
