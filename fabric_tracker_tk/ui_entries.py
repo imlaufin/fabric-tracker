@@ -15,6 +15,7 @@ class EntriesFrame(ttk.Frame):
         frm = ttk.Frame(self)
         frm.pack(fill="x", padx=8, pady=8)
 
+        # Form Labels and Entries
         ttk.Label(frm, text="Date").grid(row=0, column=0)
         self.date_e = ttk.Entry(frm, width=12)
         self.date_e.grid(row=0, column=1)
@@ -51,45 +52,48 @@ class EntriesFrame(ttk.Frame):
         self.delivered_cb = ttk.Combobox(frm, width=25)
         self.delivered_cb.grid(row=3, column=1)
 
+        # Action Buttons
         ttk.Button(frm, text="Save", command=self.save).grid(row=4, column=0, pady=8)
         ttk.Button(frm, text="Clear", command=self.clear_form).grid(row=4, column=1)
         ttk.Button(frm, text="Create Lot for Batch", command=self.create_lot_dialog).grid(row=4, column=2)
         ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3)
 
-        # recent entries table
+        # Recent entries table
         cols = ("date","batch","lot","supplier","yarn","kg","rolls","price","delivered")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=12)
         headings = ["Date","Batch","Lot","Supplier","Yarn Type","Kg","Rolls","Price/unit","Delivered"]
         widths = [90,90,110,150,150,80,80,80,140]
+        self.tree = ttk.Treeview(self, columns=cols, show="headings", height=12)
         for c,h,w in zip(cols, headings, widths):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
         self.tree.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.tree.bind("<Double-1>", self.on_tree_double_click)
-        self.tree.bind("<Return>", lambda e: self.save())  # enter key
-
-        # enter key in delivered to saves
+        self.tree.bind("<Return>", lambda e: self.save())
         self.delivered_cb.bind("<Return>", lambda e: self.save())
 
         self.reload_entries()
 
     def refresh_lists(self):
+        """Refresh suppliers, delivered-to, and yarn type lists from DB."""
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT name FROM suppliers ORDER BY name")
         masters = [r["name"] for r in cur.fetchall()]
 
-        self.supplier_cb["values"] = masters
+        # Delivered To must be from Masters
         self.delivered_cb["values"] = masters
+        # Supplier can be free text
+        cur.execute("SELECT DISTINCT name FROM suppliers ORDER BY name")
+        self.supplier_cb["values"] = [r["name"] for r in cur.fetchall()]
 
         cur.execute("SELECT name FROM yarn_types ORDER BY name")
-        yarns = [r["name"] for r in cur.fetchall()]
-        self.yarn_cb["values"] = yarns
+        self.yarn_cb["values"] = [r["name"] for r in cur.fetchall()]
 
         conn.close()
 
     def reload_entries(self):
+        """Load existing purchases into the table."""
         for r in self.tree.get_children():
             self.tree.delete(r)
         conn = db.get_connection()
@@ -107,6 +111,7 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def save(self):
+        """Save or update a purchase entry."""
         date = self.date_e.get().strip()
         batch = self.batch_e.get().strip()
         lot = self.lot_e.get().strip()
@@ -115,26 +120,19 @@ class EntriesFrame(ttk.Frame):
         delivered = self.delivered_cb.get().strip()
         try:
             kg = float(self.kg_e.get().strip() or 0)
-        except ValueError:
-            messagebox.showerror("Invalid", "Qty kg must be a number")
-            return
-        try:
             rolls = int(self.rolls_e.get().strip() or 0)
-        except ValueError:
-            messagebox.showerror("Invalid", "Qty rolls must be integer")
-            return
-        try:
             price = float(self.price_e.get().strip() or 0)
         except ValueError:
-            messagebox.showerror("Invalid", "Price/unit must be a number")
+            messagebox.showerror("Invalid", "Qty or Price fields must be numeric")
             return
 
-        if not date or not supplier or not yarn or (kg==0 and rolls==0) or not delivered:
+        if not date or not yarn or (kg==0 and rolls==0) or not delivered:
             messagebox.showwarning("Missing", "Please fill required fields")
             return
 
-        if supplier not in self.supplier_cb["values"] or delivered not in self.delivered_cb["values"]:
-            messagebox.showerror("Invalid", "Supplier or Delivered To not in masters list")
+        # Only Delivered To must be in masters
+        if delivered not in self.delivered_cb["values"]:
+            messagebox.showerror("Invalid Delivered To", f"'{delivered}' must be in Masters list")
             return
 
         try:
@@ -151,7 +149,7 @@ class EntriesFrame(ttk.Frame):
         self.clear_form()
         self.selected_purchase_id = None
 
-        # update fabricators tab
+        # Update fabricators tab
         if self.controller and hasattr(self.controller, "fabricators_frame"):
             try:
                 self.controller.fabricators_frame.build_tabs()
@@ -159,6 +157,7 @@ class EntriesFrame(ttk.Frame):
                 pass
 
     def clear_form(self):
+        """Reset form fields."""
         self.batch_e.delete(0, tk.END)
         self.lot_e.delete(0, tk.END)
         self.kg_e.delete(0, tk.END)
@@ -169,6 +168,7 @@ class EntriesFrame(ttk.Frame):
         self.selected_purchase_id = None
 
     def create_lot_dialog(self):
+        """Dialog to create multiple lots for a batch."""
         batch_ref = self.batch_e.get().strip()
         if not batch_ref:
             messagebox.showwarning("Batch required", "Enter the batch id first.")
@@ -206,15 +206,14 @@ class EntriesFrame(ttk.Frame):
         messagebox.showinfo("Done", f"{lots} lots created.")
 
     def on_tree_double_click(self, event):
+        """Load selected purchase into form for editing."""
         item = self.tree.selection()
         if not item:
             return
         purchase_id = int(item[0])
         conn = db.get_connection()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT * FROM purchases WHERE id=?
-        """, (purchase_id,))
+        cur.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,))
         row = cur.fetchone()
         conn.close()
         if not row:
