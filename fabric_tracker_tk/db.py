@@ -83,6 +83,7 @@ def init_db():
         yarn_type TEXT,
         qty_kg REAL,
         qty_rolls INTEGER,
+        price_per_unit REAL DEFAULT 0,
         delivered_to TEXT,
         notes TEXT
     )
@@ -111,6 +112,7 @@ def init_db():
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
     """)
+
     # Dyeing outputs
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dyeing_outputs (
@@ -266,14 +268,28 @@ def create_lot(batch_id, lot_index):
 # ----------------------------
 # Purchases / Dyeing Outputs
 # ----------------------------
-def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes=""):
+def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit=0, delivered_to="", notes=""):
+    """Add a new purchase"""
     conn = get_connection()
     cur = conn.cursor()
     db_date = ui_to_db_date(date)
     cur.execute("""
-        INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (db_date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes))
+        INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (db_date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes))
+    conn.commit()
+    conn.close()
+
+def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes=""):
+    """Edit an existing purchase by id"""
+    conn = get_connection()
+    cur = conn.cursor()
+    db_date = ui_to_db_date(date)
+    cur.execute("""
+        UPDATE purchases
+        SET date=?, batch_id=?, lot_no=?, supplier=?, yarn_type=?, qty_kg=?, qty_rolls=?, price_per_unit=?, delivered_to=?, notes=?
+        WHERE id=?
+    """, (db_date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, purchase_id))
     conn.commit()
     conn.close()
 
