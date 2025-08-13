@@ -1,3 +1,4 @@
+# db.py
 import sqlite3
 import os
 import shutil
@@ -7,11 +8,13 @@ DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 
+
 # ----------------------------
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
     return os.path.join(os.path.dirname(__file__), DB_PATH)
+
 
 def backup_db():
     if not os.path.exists(BACKUP_DIR):
@@ -30,13 +33,17 @@ def backup_db():
             pass
     return dest
 
+
 # ----------------------------
 # Database Connection
 # ----------------------------
 def get_connection():
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
+    # Ensure FK constraints (for lots/dyeing foreign keys)
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
+
 
 # ----------------------------
 # DB Initialization / Migrations
@@ -114,7 +121,7 @@ def init_db():
         returned_qty_kg REAL,
         returned_qty_rolls INTEGER,
         notes TEXT,
-        FOREIGN KEY(lot_id) REFERENCES lots(id),
+        FOREIGN KEY(lot_id) REFERENCES lots(id) ON DELETE CASCADE,
         FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id)
     )
     """)
@@ -124,6 +131,9 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_suppliers_type ON suppliers(type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_yarn_types_name ON yarn_types(name)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_lots_lot_no ON lots(lot_no)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_lot_no ON purchases(lot_no)")
 
     conn.commit()
 
@@ -141,6 +151,7 @@ def init_db():
     else:
         print("[DB] DB init/migrations complete.")
 
+
 # ----------------------------
 # Date Conversion Helpers
 # ----------------------------
@@ -149,6 +160,7 @@ def db_to_ui_date(db_date: str) -> str:
         return ""
     dt = datetime.strptime(db_date, "%Y-%m-%d")
     return dt.strftime("%d/%m/%Y")
+
 
 def ui_to_db_date(ui_date: str) -> str:
     if not ui_date:
@@ -174,6 +186,15 @@ def ui_to_db_date(ui_date: str) -> str:
     except Exception as e:
         raise ValueError(f"Invalid date '{ui_date}': {e}")
 
+
+# ----------------------------
+# LIKE helpers (prefix search)
+# ----------------------------
+def _escape_like(s: str) -> str:
+    """Escape % and _ for LIKE queries."""
+    return s.replace("%", r"\%").replace("_", r"\_")
+
+
 # ----------------------------
 # Supplier / Masters
 # ----------------------------
@@ -192,6 +213,31 @@ def list_suppliers(supplier_type=None):
     conn.close()
     return rows
 
+
+def search_suppliers_prefix(prefix: str, supplier_type: str = None, limit: int = 20):
+    """
+    Prefix-based search for suppliers (used for autocomplete).
+    If supplier_type is provided, filter by that type.
+    """
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
+    conn = get_connection()
+    cur = conn.cursor()
+    if supplier_type:
+        cur.execute(
+            r"SELECT id, name, type, color_code FROM suppliers WHERE type=? AND name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?",
+            (supplier_type, like, limit),
+        )
+    else:
+        cur.execute(
+            r"SELECT id, name, type, color_code FROM suppliers WHERE name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?",
+            (like, limit),
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
 def add_master(name, mtype="yarn_supplier", color_code=""):
     if not name or not name.strip():
         return
@@ -204,12 +250,14 @@ def add_master(name, mtype="yarn_supplier", color_code=""):
     conn.commit()
     conn.close()
 
+
 def update_master_color_and_type(name, mtype, color_hex):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
     conn.commit()
     conn.close()
+
 
 def delete_master_by_name(name: str):
     """
@@ -223,6 +271,7 @@ def delete_master_by_name(name: str):
     cur.execute("DELETE FROM suppliers WHERE name=?", (name.strip(),))
     conn.commit()
     conn.close()
+
 
 def get_supplier_id_by_name(name: str, required_type: str = None):
     """
@@ -240,6 +289,7 @@ def get_supplier_id_by_name(name: str, required_type: str = None):
     conn.close()
     return row["id"] if row else None
 
+
 def is_delivered_to_valid(name):
     if not name or not name.strip():
         return False
@@ -249,6 +299,7 @@ def is_delivered_to_valid(name):
     exists = cur.fetchone() is not None
     conn.close()
     return exists
+
 
 # ----------------------------
 # Yarn Types
@@ -261,6 +312,7 @@ def list_yarn_types():
     conn.close()
     return rows
 
+
 def add_yarn_type(name: str):
     if not name or not name.strip():
         return
@@ -269,6 +321,18 @@ def add_yarn_type(name: str):
     cur.execute("INSERT OR IGNORE INTO yarn_types (name) VALUES (?)", (name.strip(),))
     conn.commit()
     conn.close()
+
+
+def search_yarn_types_prefix(prefix: str, limit: int = 20):
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(r"SELECT name FROM yarn_types WHERE name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?", (like, limit))
+    rows = [r["name"] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
 
 # ----------------------------
 # Fabricators / Batches / Lots
@@ -281,6 +345,7 @@ def get_fabricators(fab_type):
     conn.close()
     return rows
 
+
 def get_batches_for_fabricator(fabricator_id):
     conn = get_connection()
     cur = conn.cursor()
@@ -288,6 +353,18 @@ def get_batches_for_fabricator(fabricator_id):
     rows = cur.fetchall()
     conn.close()
     return rows
+
+
+def search_batches_prefix(prefix: str, limit: int = 20):
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(r"SELECT batch_ref FROM batches WHERE batch_ref LIKE ? ESCAPE '\' ORDER BY batch_ref LIMIT ?", (like, limit))
+    rows = [r["batch_ref"] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
 
 def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composition=""):
     conn = get_connection()
@@ -305,6 +382,7 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
     conn.close()
     return bid
 
+
 def create_lot(batch_id, lot_index):
     conn = get_connection()
     cur = conn.cursor()
@@ -317,6 +395,29 @@ def create_lot(batch_id, lot_index):
     conn.commit()
     conn.close()
     return lid
+
+
+def get_lot_id_by_no(lot_no: str):
+    if not lot_no or not lot_no.strip():
+        return None
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM lots WHERE lot_no=? LIMIT 1", (lot_no.strip(),))
+    row = cur.fetchone()
+    conn.close()
+    return row["id"] if row else None
+
+
+def search_lots_prefix(prefix: str, limit: int = 20):
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(r"SELECT lot_no FROM lots WHERE lot_no LIKE ? ESCAPE '\' ORDER BY lot_no LIMIT ?", (like, limit))
+    rows = [r["lot_no"] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
 
 # ----------------------------
 # Purchases / Dyeing Outputs
@@ -335,6 +436,7 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     conn.commit()
     conn.close()
 
+
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
                   price_per_unit, delivered_to, notes=""):
     if not is_delivered_to_valid(delivered_to):
@@ -350,6 +452,7 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
     conn.commit()
     conn.close()
 
+
 def delete_purchase(purchase_id: int):
     conn = get_connection()
     cur = conn.cursor()
@@ -357,16 +460,37 @@ def delete_purchase(purchase_id: int):
     conn.commit()
     conn.close()
 
+
 def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
+    """
+    Accepts either:
+      - lot_id as an integer (lots.id), or
+      - lot_id as a string lot_no like 'BATCH/1' (will be resolved to lots.id).
+    """
+    # Resolve lot_id if a lot_no string is passed
+    resolved_lot_id = None
+    if isinstance(lot_id, int):
+        resolved_lot_id = lot_id
+    else:
+        # try to coerce to int first
+        try:
+            resolved_lot_id = int(str(lot_id).strip())
+        except Exception:
+            resolved_lot_id = get_lot_id_by_no(str(lot_id).strip())
+
+    if not resolved_lot_id:
+        raise ValueError(f"Lot not found for '{lot_id}'")
+
     conn = get_connection()
     cur = conn.cursor()
     db_date = ui_to_db_date(returned_date)
     cur.execute("""
         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (lot_id, dyeing_unit_id, db_date, returned_qty_kg, returned_qty_rolls, notes))
+    """, (resolved_lot_id, dyeing_unit_id, db_date, returned_qty_kg, returned_qty_rolls, notes))
     conn.commit()
     conn.close()
+
 
 def delete_dyeing_output(dyeing_id: int):
     conn = get_connection()
@@ -374,3 +498,14 @@ def delete_dyeing_output(dyeing_id: int):
     cur.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
     conn.commit()
     conn.close()
+
+
+# ----------------------------
+# Autocomplete convenience (Delivered-To)
+# ----------------------------
+def search_delivered_to_prefix(prefix: str, limit: int = 20):
+    """
+    Alias for supplier prefix search when populating the 'Delivered To' combobox.
+    No type filter (since Delivered To can be any supplier/fabricator you decide).
+    """
+    return search_suppliers_prefix(prefix=prefix, supplier_type=None, limit=limit)
