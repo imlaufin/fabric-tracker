@@ -119,14 +119,17 @@ def init_db():
     )
     """)
 
+    # Helpful indexes
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_suppliers_type ON suppliers(type)")
 
     conn.commit()
 
-    # Add default knitting and dyeing units
-    for unit_name, unit_type in [("Default Knitting Unit", "knitting_unit"), ("Default Dyeing Unit", "dyeing_unit")]:
+    # Add default knitting and dyeing units (safe idempotent insert)
+    for unit_name, unit_type in [("Default Knitting Unit", "knitting_unit"),
+                                 ("Default Dyeing Unit", "dyeing_unit")]:
         cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
         if not cur.fetchone():
             cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
@@ -175,6 +178,10 @@ def ui_to_db_date(ui_date: str) -> str:
 # Supplier / Masters
 # ----------------------------
 def list_suppliers(supplier_type=None):
+    """
+    If supplier_type is provided (e.g., 'dyeing_unit'), returns rows with (id, name, color_code).
+    Otherwise returns rows with (id, name, type, color_code).
+    """
     conn = get_connection()
     cur = conn.cursor()
     if supplier_type:
@@ -186,11 +193,14 @@ def list_suppliers(supplier_type=None):
     return rows
 
 def add_master(name, mtype="yarn_supplier", color_code=""):
-    if not name.strip():
+    if not name or not name.strip():
         return
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO suppliers (name, type, color_code) VALUES (?, ?, ?)", (name.strip(), mtype, color_code))
+    cur.execute(
+        "INSERT OR IGNORE INTO suppliers (name, type, color_code) VALUES (?, ?, ?)",
+        (name.strip(), mtype, color_code)
+    )
     conn.commit()
     conn.close()
 
@@ -201,8 +211,37 @@ def update_master_color_and_type(name, mtype, color_hex):
     conn.commit()
     conn.close()
 
+def delete_master_by_name(name: str):
+    """
+    Delete a supplier by name. (ui_masters.py currently deletes directly;
+    this helper lets you route it through db.py if you prefer.)
+    """
+    if not name or not name.strip():
+        return
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM suppliers WHERE name=?", (name.strip(),))
+    conn.commit()
+    conn.close()
+
+def get_supplier_id_by_name(name: str, required_type: str = None):
+    """
+    Utility to fetch supplier id by name (optionally filtering by type).
+    """
+    if not name or not name.strip():
+        return None
+    conn = get_connection()
+    cur = conn.cursor()
+    if required_type:
+        cur.execute("SELECT id FROM suppliers WHERE name=? AND type=? LIMIT 1", (name.strip(), required_type))
+    else:
+        cur.execute("SELECT id FROM suppliers WHERE name=? LIMIT 1", (name.strip(),))
+    row = cur.fetchone()
+    conn.close()
+    return row["id"] if row else None
+
 def is_delivered_to_valid(name):
-    if not name.strip():
+    if not name or not name.strip():
         return False
     conn = get_connection()
     cur = conn.cursor()
@@ -217,10 +256,19 @@ def is_delivered_to_valid(name):
 def list_yarn_types():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT name FROM yarn_types")
+    cur.execute("SELECT DISTINCT name FROM yarn_types ORDER BY name")
     rows = [r["name"] for r in cur.fetchall()]
     conn.close()
     return rows
+
+def add_yarn_type(name: str):
+    if not name or not name.strip():
+        return
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO yarn_types (name) VALUES (?)", (name.strip(),))
+    conn.commit()
+    conn.close()
 
 # ----------------------------
 # Fabricators / Batches / Lots
@@ -251,7 +299,7 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
     bid = cur.lastrowid
 
     # Auto-create lots
-    for i in range(1, expected_lots+1):
+    for i in range(1, expected_lots + 1):
         create_lot(bid, i)
     conn.commit()
     conn.close()
@@ -273,7 +321,8 @@ def create_lot(batch_id, lot_index):
 # ----------------------------
 # Purchases / Dyeing Outputs
 # ----------------------------
-def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit=0, delivered_to="", notes=""):
+def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
+                    price_per_unit=0, delivered_to="", notes=""):
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
@@ -286,7 +335,8 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     conn.commit()
     conn.close()
 
-def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes=""):
+def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
+                  price_per_unit, delivered_to, notes=""):
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
@@ -300,6 +350,13 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
     conn.commit()
     conn.close()
 
+def delete_purchase(purchase_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
+    conn.commit()
+    conn.close()
+
 def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
     conn = get_connection()
     cur = conn.cursor()
@@ -308,5 +365,12 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (lot_id, dyeing_unit_id, db_date, returned_qty_kg, returned_qty_rolls, notes))
+    conn.commit()
+    conn.close()
+
+def delete_dyeing_output(dyeing_id: int):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
     conn.commit()
     conn.close()
