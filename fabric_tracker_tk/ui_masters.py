@@ -10,6 +10,7 @@ class MastersFrame(ttk.Frame):
         super().__init__(parent)
         self.controller = controller
         self.on_change_callback = on_change_callback
+        self.chosen_color = ""
         self.build_ui()
         self.load_suppliers()
 
@@ -22,7 +23,6 @@ class MastersFrame(ttk.Frame):
         self.name_entry.grid(row=0, column=1, padx=5)
 
         ttk.Label(top, text="Type:").grid(row=0, column=2, sticky="w")
-        self.type_var = tk.StringVar(value="yarn_supplier")
         self.type_cb = ttk.Combobox(top, values=[t[0] for t in FAB_TYPES], state="readonly", width=18)
         self.type_cb.grid(row=0, column=3, padx=5)
         self.type_cb.current(0)
@@ -32,10 +32,9 @@ class MastersFrame(ttk.Frame):
         self.color_btn.grid(row=0, column=5, padx=5)
 
         ttk.Button(top, text="Add / Update", command=self.add_or_update).grid(row=0, column=6, padx=8)
-
         ttk.Button(top, text="Reload Fabricators", command=self.reload_cb_and_notify).grid(row=0, column=7, padx=8)
 
-        # List
+        # Treeview for list of masters
         self.tree = ttk.Treeview(self, columns=("name", "type", "color"), show="headings", height=10)
         self.tree.heading("name", text="Name")
         self.tree.heading("type", text="Type")
@@ -58,7 +57,7 @@ class MastersFrame(ttk.Frame):
         if not name:
             messagebox.showwarning("Missing", "Name required")
             return
-        # map type label to key
+
         type_label = self.type_cb.get()
         type_map = {t[0]: t[1] for t in FAB_TYPES}
         mtype = type_map.get(type_label, "yarn_supplier")
@@ -67,6 +66,13 @@ class MastersFrame(ttk.Frame):
         db.add_master(name, mtype, color_hex)
         db.update_master_color_and_type(name, mtype, color_hex)
         messagebox.showinfo("Saved", f"{name} saved/updated.")
+
+        # Reset form for next entry
+        self.name_entry.delete(0, tk.END)
+        self.type_cb.current(0)
+        self.chosen_color = ""
+        self.color_btn.configure(text="Choose", background=None)
+
         self.load_suppliers()
         self.reload_cb_and_notify()
 
@@ -101,19 +107,20 @@ class MastersFrame(ttk.Frame):
             return
         vals = self.tree.item(sel[0])["values"]
         name, typelabel, color = vals
-        # prefill
+        # prefill form
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
-        # set type combobox index
+
         labels = [t[0] for t in FAB_TYPES]
         try:
             self.type_cb.current(labels.index(typelabel))
         except Exception:
-            pass
-        self.chosen_color = color
+            self.type_cb.current(0)
+
+        self.chosen_color = color or ""
         self.color_btn.configure(text=color or "Choose", background=color or None)
 
     def reload_cb_and_notify(self):
-        # notify controller to rebuild fabricator tabs if provided
+        # Notify controller to rebuild fabricator tabs if provided
         if self.on_change_callback:
             self.on_change_callback()
