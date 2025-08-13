@@ -44,7 +44,12 @@ class KnittingTab(ttk.Frame):
         for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Supplier","Type","Kg","Rolls","Batch","Lot"]):
             self.tx_tree.heading(c, text=h)
             self.tx_tree.column(c, width=w)
-        self.tx_tree.pack(fill="both", expand=True)
+        self.tx_tree.pack(fill="both", expand=True, side="left")
+
+        # Add vertical scrollbar
+        vsb = ttk.Scrollbar(tx_frame, orient="vertical", command=self.tx_tree.yview)
+        vsb.pack(side="right", fill="y")
+        self.tx_tree.configure(yscrollcommand=vsb.set)
 
         # Batch Status
         batch_frame = ttk.LabelFrame(self, text="Batches & Status")
@@ -53,7 +58,12 @@ class KnittingTab(ttk.Frame):
         for col, text, w in zip(("batch_ref","product","expected","delivered","pending"), ["Batch","Product","Expected","Delivered","Pending"], [120,200,80,80,80]):
             self.batch_tree.heading(col, text=text)
             self.batch_tree.column(col, width=w)
-        self.batch_tree.pack(fill="x", expand=True)
+        self.batch_tree.pack(fill="x", expand=True, side="left")
+
+        vsb2 = ttk.Scrollbar(batch_frame, orient="vertical", command=self.batch_tree.yview)
+        vsb2.pack(side="right", fill="y")
+        self.batch_tree.configure(yscrollcommand=vsb2.set)
+
         self.batch_tree.bind("<Double-1>", self.on_batch_double)
 
         # Stock Summary
@@ -63,7 +73,11 @@ class KnittingTab(ttk.Frame):
         for col, text, w in zip(("yarn_type","balance_kg","balance_rolls"), ["Yarn Type","Balance (kg)","Balance (rolls)"], [200,120,120]):
             self.summary_tree.heading(col, text=text)
             self.summary_tree.column(col, width=w)
-        self.summary_tree.pack(fill="both", expand=True)
+        self.summary_tree.pack(fill="both", expand=True, side="left")
+
+        vsb3 = ttk.Scrollbar(summary_frame, orient="vertical", command=self.summary_tree.yview)
+        vsb3.pack(side="right", fill="y")
+        self.summary_tree.configure(yscrollcommand=vsb3.set)
 
     def reload_all(self):
         self.load_inward_transactions()
@@ -109,7 +123,6 @@ class KnittingTab(ttk.Frame):
             return
         vals = self.batch_tree.item(sel[0])["values"]
         batch_ref = vals[0]
-        # find if this batch was sent to a dyeer (via purchases entries)
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT delivered_to FROM purchases WHERE batch_id=? AND delivered_to IS NOT NULL AND delivered_to != '' LIMIT 1", (batch_ref,))
@@ -161,6 +174,7 @@ class KnittingTab(ttk.Frame):
             self.summary_tree.insert("", "end", values=(r["yarn_type"], r["kg_sum"] or 0, r["rolls_sum"] or 0))
         conn.close()
 
+
 class DyeingTab(ttk.Frame):
     def __init__(self, parent, fabricator_row, controller=None):
         super().__init__(parent)
@@ -184,7 +198,11 @@ class DyeingTab(ttk.Frame):
         for c,h,w in zip(cols, headings, widths):
             self.pending_tree.heading(c, text=h)
             self.pending_tree.column(c, width=w)
-        self.pending_tree.pack(fill="both", expand=True)
+        self.pending_tree.pack(fill="both", expand=True, side="left")
+
+        vsb = ttk.Scrollbar(pending_frame, orient="vertical", command=self.pending_tree.yview)
+        vsb.pack(side="right", fill="y")
+        self.pending_tree.configure(yscrollcommand=vsb.set)
 
         completed_frame = ttk.LabelFrame(self, text="Completed Batches")
         completed_frame.pack(fill="both", expand=True, padx=6, pady=6)
@@ -192,7 +210,11 @@ class DyeingTab(ttk.Frame):
         for c,h,w in zip(cols, headings, widths):
             self.completed_tree.heading(c, text=h)
             self.completed_tree.column(c, width=w)
-        self.completed_tree.pack(fill="both", expand=True)
+        self.completed_tree.pack(fill="both", expand=True, side="left")
+
+        vsb2 = ttk.Scrollbar(completed_frame, orient="vertical", command=self.completed_tree.yview)
+        vsb2.pack(side="right", fill="y")
+        self.completed_tree.configure(yscrollcommand=vsb2.set)
 
     def reload_all(self):
         self.load_pending()
@@ -209,8 +231,7 @@ class DyeingTab(ttk.Frame):
             WHERE p.delivered_to=?
             GROUP BY p.batch_id, p.lot_no, p.yarn_type
         """, (self.fabricator["name"],))
-        lots = cur.fetchall()
-        for lot in lots:
+        for lot in cur.fetchall():
             batch_ref = lot["batch_id"]
             lot_no = lot["lot_no"]
             yarn_type = lot["yarn_type"]
@@ -243,8 +264,7 @@ class DyeingTab(ttk.Frame):
             WHERE p.delivered_to=?
             GROUP BY p.batch_id, p.lot_no, p.yarn_type
         """, (self.fabricator["name"],))
-        lots = cur.fetchall()
-        for lot in lots:
+        for lot in cur.fetchall():
             batch_ref = lot["batch_id"]
             lot_no = lot["lot_no"]
             orig_kg = lot["orig_kg"] or 0
@@ -265,6 +285,7 @@ class DyeingTab(ttk.Frame):
                 self.completed_tree.insert("", "end", values=(batch_ref, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.completed_tree.tag_configure("short", background="#ffcccc")
         conn.close()
+
 
 class FabricatorsFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
@@ -292,7 +313,7 @@ class FabricatorsFrame(ttk.Frame):
         self.parent_nb.add(kn_parent, text="Knitting Units")
         self.parent_nb.add(dy_parent, text="Dyeing Units")
 
-        # create sub-notebooks (one for knitting units, one for dyeing units)
+        # create sub-notebooks
         kn_nb = ttk.Notebook(kn_parent)
         kn_nb.pack(fill="both", expand=True)
         dy_nb = ttk.Notebook(dy_parent)
@@ -306,16 +327,13 @@ class FabricatorsFrame(ttk.Frame):
         knitting_units = db.get_fabricators("knitting_unit")
         dyeing_units = db.get_fabricators("dyeing_unit")
 
-        # add knitting units as individual tabs
         for r in knitting_units:
             tab = KnittingTab(kn_nb, r, controller=self.controller)
             kn_nb.add(tab, text=r["name"])
-            # store reference
             if r["name"] not in self.tabs:
                 self.tabs[r["name"]] = {}
             self.tabs[r["name"]]["knitting"] = tab
 
-        # add dyeing units as individual tabs
         for r in dyeing_units:
             tab = DyeingTab(dy_nb, r, controller=self.controller)
             dy_nb.add(tab, text=r["name"])
@@ -324,32 +342,25 @@ class FabricatorsFrame(ttk.Frame):
             self.tabs[r["name"]]["dyeing"] = tab
 
     def open_dyeing_tab_for_batch(self, fabricator_name, batch_ref):
-        # switch to Dyeing Units parent tab
-        # find the parent tab index for "Dyeing Units"
         for ptab in self.parent_nb.tabs():
             if self.parent_nb.tab(ptab, "text") == "Dyeing Units":
                 self.parent_nb.select(ptab)
                 break
 
-        # now select the dyeing sub-tab matching fabricator_name
         if not hasattr(self, "dy_nb"):
             return
         for st in self.dy_nb.tabs():
             if self.dy_nb.tab(st, "text") == fabricator_name:
-                # select the subtab
                 self.dy_nb.select(st)
                 widget = self.dy_nb.nametowidget(st)
                 if hasattr(widget, "reload_all"):
                     widget.reload_all()
-                # highlight matching batch rows in pending/completed
                 try:
-                    # pending
                     for item in widget.pending_tree.get_children():
                         vals = widget.pending_tree.item(item)["values"]
                         if vals and vals[0] == batch_ref:
                             widget.pending_tree.selection_set(item)
                             widget.pending_tree.see(item)
-                    # completed
                     for item in widget.completed_tree.get_children():
                         vals = widget.completed_tree.item(item)["values"]
                         if vals and vals[0] == batch_ref:
