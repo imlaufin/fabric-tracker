@@ -14,7 +14,6 @@ def pastel_tint(hex_color, factor=0.85):
     r = int(hex_color[0:2], 16)
     g = int(hex_color[2:4], 16)
     b = int(hex_color[4:6], 16)
-    # mix towards white
     r = int(r + (255 - r) * (1 - factor))
     g = int(g + (255 - g) * (1 - factor))
     b = int(b + (255 - b) * (1 - factor))
@@ -151,5 +150,151 @@ class KnittingTab(ttk.Frame):
             self.summary_tree.insert("", "end", values=(r["yarn_type"], r["kg_sum"] or 0, r["rolls_sum"] or 0))
         conn.close()
 
-# DyeingTab and FabricatorsFrame classes remain the same as before
-# Only KnittingTab needed the updated controller linkage
+class DyeingTab(ttk.Frame):
+    def __init__(self, parent, fabricator_row, controller=None):
+        super().__init__(parent)
+        self.fabricator = fabricator_row
+        self.controller = controller
+        self.build_ui()
+        self.reload_all()
+
+    def build_ui(self):
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=6, pady=6)
+        ttk.Label(top, text=f"Dyeing Unit: {self.fabricator['name']}", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Button(top, text="Refresh", command=self.reload_all).pack(side="right")
+
+        pending_frame = ttk.LabelFrame(self, text="Pending Batches")
+        pending_frame.pack(fill="both", expand=True, padx=6, pady=6)
+        cols = ("batch_ref","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
+        headings = ["Batch","Lot","Type","Orig (kg)","Orig (rolls)","Returned (kg)","Returned (rolls)","Short (kg)","Short (%)"]
+        widths = [80,120,80,100,100,100,100,90,90]
+        self.pending_tree = ttk.Treeview(pending_frame, columns=cols, show="headings", height=8)
+        for c,h,w in zip(cols, headings, widths):
+            self.pending_tree.heading(c, text=h)
+            self.pending_tree.column(c, width=w)
+        self.pending_tree.pack(fill="both", expand=True)
+
+        completed_frame = ttk.LabelFrame(self, text="Completed Batches")
+        completed_frame.pack(fill="both", expand=True, padx=6, pady=6)
+        self.completed_tree = ttk.Treeview(completed_frame, columns=cols, show="headings", height=8)
+        for c,h,w in zip(cols, headings, widths):
+            self.completed_tree.heading(c, text=h)
+            self.completed_tree.column(c, width=w)
+        self.completed_tree.pack(fill="both", expand=True)
+
+    def reload_all(self):
+        self.load_pending()
+        self.load_completed()
+
+    def load_pending(self):
+        for r in self.pending_tree.get_children():
+            self.pending_tree.delete(r)
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+            FROM purchases p
+            WHERE p.delivered_to=?
+            GROUP BY p.batch_id, p.lot_no, p.yarn_type
+        """, (self.fabricator["name"],))
+        lots = cur.fetchall()
+        for lot in lots:
+            batch_ref = lot["batch_id"]
+            lot_no = lot["lot_no"]
+            yarn_type = lot["yarn_type"]
+            orig_kg = lot["orig_kg"] or 0
+            orig_rolls = lot["orig_rolls"] or 0
+            cur.execute("""
+                SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
+                FROM dyeing_outputs d
+                JOIN lots l ON d.lot_id = l.id
+                WHERE l.lot_no=? AND d.dyeing_unit_id=?
+            """, (lot_no, self.fabricator["id"]))
+            out = cur.fetchone()
+            rkg = out["rkg"] or 0
+            rrolls = out["rrolls"] or 0
+            short_kg = orig_kg - rkg
+            short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
+            tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
+            self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+        self.pending_tree.tag_configure("short", background="#ffcccc")
+        conn.close()
+
+    def load_completed(self):
+        for r in self.completed_tree.get_children():
+            self.completed_tree.delete(r)
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+            FROM purchases p
+            WHERE p.delivered_to=?
+            GROUP BY p.batch_id, p.lot_no, p.yarn_type
+        """, (self.fabricator["name"],))
+        lots = cur.fetchall()
+        for lot in lots:
+            batch_ref = lot["batch_id"]
+            lot_no = lot["lot_no"]
+            orig_kg = lot["orig_kg"] or 0
+            orig_rolls = lot["orig_rolls"] or 0
+            cur.execute("""
+                SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
+                FROM dyeing_outputs d
+                JOIN lots l ON d.lot_id = l.id
+                WHERE l.lot_no=? AND d.dyeing_unit_id=?
+            """, (lot_no, self.fabricator["id"]))
+            out = cur.fetchone()
+            rkg = out["rkg"] or 0
+            rrolls = out["rrolls"] or 0
+            if rrolls >= orig_rolls and orig_rolls>0:
+                short_kg = orig_kg - rkg
+                short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
+                tag = "short" if short_pct>SHORTAGE_THRESHOLD_PERCENT else ""
+                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+        self.completed_tree.tag_configure("short", background="#ffcccc")
+        conn.close()
+
+class FabricatorsFrame(ttk.Frame):
+    def __init__(self, parent, controller=None):
+        super().__init__(parent)
+        self.controller = controller
+        self.build_ui()
+        self.build_tabs()
+
+    def build_ui(self):
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=6, pady=6)
+        ttk.Label(top, text="Fabricators").pack(side="left")
+        ttk.Button(top, text="Reload Tabs", command=self.build_tabs).pack(side="right")
+        self.parent_nb = ttk.Notebook(self)
+        self.parent_nb.pack(fill="both", expand=True)
+
+    def build_tabs(self):
+        for child in self.parent_nb.winfo_children():
+            child.destroy()
+        # Fetch all fabricators
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM fabricators ORDER BY name")
+        fabricators = cur.fetchall()
+        conn.close()
+        # Create tabs
+        self.tabs = {}
+        kn_tab_frame = ttk.Frame(self.parent_nb)
+        self.parent_nb.add(kn_tab_frame, text="Knitting Units")
+        dy_tab_frame = ttk.Frame(self.parent_nb)
+        self.parent_nb.add(dy_tab_frame, text="Dyeing Units")
+        for f in fabricators:
+            kn_tab = KnittingTab(kn_tab_frame, f, controller=self.controller)
+            kn_tab.pack(fill="both", expand=True)
+            dy_tab = DyeingTab(dy_tab_frame, f, controller=self.controller)
+            dy_tab.pack(fill="both", expand=True)
+            self.tabs[f["name"]] = {"knitting": kn_tab, "dyeing": dy_tab}
+
+    def open_dyeing_tab_for_batch(self, fabricator_name, batch_ref):
+        idx = self.parent_nb.index("end") - 1  # last tab is Dyeing Units
+        self.parent_nb.select(idx)  # switch to Dyeing Units
+        dy_tab = self.tabs.get(fabricator_name, {}).get("dyeing")
+        if dy_tab:
+            dy_tab.reload_all()
