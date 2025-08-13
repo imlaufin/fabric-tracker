@@ -197,9 +197,12 @@ def list_suppliers(supplier_type=None):
     return rows
 
 def add_master(name, mtype="yarn_supplier", color_code=""):
+    """Add a master (supplier/fabricator) to the DB. If exists, ignore."""
+    if not name.strip():
+        return
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO suppliers (name, type, color_code) VALUES (?, ?, ?)", (name, mtype, color_code))
+    cur.execute("INSERT OR IGNORE INTO suppliers (name, type, color_code) VALUES (?, ?, ?)", (name.strip(), mtype, color_code))
     conn.commit()
     conn.close()
 
@@ -209,6 +212,17 @@ def update_master_color_and_type(name, mtype, color_hex):
     cur.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
     conn.commit()
     conn.close()
+
+def is_delivered_to_valid(name):
+    """Return True if delivered_to exists in suppliers table."""
+    if not name.strip():
+        return False
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM suppliers WHERE name=? LIMIT 1", (name.strip(),))
+    exists = cur.fetchone() is not None
+    conn.close()
+    return exists
 
 # ----------------------------
 # Yarn Types
@@ -269,7 +283,9 @@ def create_lot(batch_id, lot_index):
 # Purchases / Dyeing Outputs
 # ----------------------------
 def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit=0, delivered_to="", notes=""):
-    """Add a new purchase"""
+    """Add a new purchase. delivered_to must exist in masters, supplier can be any text."""
+    if not is_delivered_to_valid(delivered_to):
+        raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
     cur = conn.cursor()
     db_date = ui_to_db_date(date)
@@ -281,7 +297,9 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     conn.close()
 
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes=""):
-    """Edit an existing purchase by id"""
+    """Edit existing purchase by id. delivered_to must exist in masters."""
+    if not is_delivered_to_valid(delivered_to):
+        raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
     cur = conn.cursor()
     db_date = ui_to_db_date(date)
