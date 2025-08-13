@@ -273,24 +273,29 @@ class FabricatorsFrame(ttk.Frame):
     def build_tabs(self):
         for child in self.parent_nb.winfo_children():
             child.destroy()
-        # Fetch all fabricators
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM fabricators ORDER BY name")
-        fabricators = cur.fetchall()
-        conn.close()
-        # Create tabs
         self.tabs = {}
+
+        # Fetch all knitting units and dyeing units from suppliers table
+        knitting_units = db.get_fabricators("knitting_unit")
+        dyeing_units = db.get_fabricators("dyeing_unit")
+
         kn_tab_frame = ttk.Frame(self.parent_nb)
         self.parent_nb.add(kn_tab_frame, text="Knitting Units")
         dy_tab_frame = ttk.Frame(self.parent_nb)
         self.parent_nb.add(dy_tab_frame, text="Dyeing Units")
-        for f in fabricators:
+
+        for f in knitting_units:
             kn_tab = KnittingTab(kn_tab_frame, f, controller=self.controller)
             kn_tab.pack(fill="both", expand=True)
+            self.tabs[f["name"]] = {"knitting": kn_tab, "dyeing": None}
+
+        for f in dyeing_units:
             dy_tab = DyeingTab(dy_tab_frame, f, controller=self.controller)
             dy_tab.pack(fill="both", expand=True)
-            self.tabs[f["name"]] = {"knitting": kn_tab, "dyeing": dy_tab}
+            if f["name"] in self.tabs:
+                self.tabs[f["name"]]["dyeing"] = dy_tab
+            else:
+                self.tabs[f["name"]] = {"knitting": None, "dyeing": dy_tab}
 
     def open_dyeing_tab_for_batch(self, fabricator_name, batch_ref):
         idx = self.parent_nb.index("end") - 1  # last tab is Dyeing Units
