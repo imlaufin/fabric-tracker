@@ -5,34 +5,73 @@ import shutil
 from datetime import datetime
 import db
 
+BACKUP_DIR = "backups"
+MAX_BACKUPS = 5  # Keep only last 5 backups
 
 class BackupRestoreFrame(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
+        os.makedirs(BACKUP_DIR, exist_ok=True)
         self.build_ui()
+        self.refresh_backup_list()
 
     def build_ui(self):
         ttk.Label(self, text="Backup & Restore Database", font=("Arial", 14, "bold")).pack(pady=10)
 
-        # Backup Button
-        ttk.Button(self, text="Backup Database", command=self.backup_db).pack(pady=10)
+        # Backup Buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="Backup Now (Auto)", command=self.backup_db_auto).pack(side="left", padx=5)
+        ttk.Button(btn_frame, text="Backup & Save As...", command=self.backup_db_manual).pack(side="left", padx=5)
 
         # Restore Button
-        ttk.Button(self, text="Restore Database", command=self.restore_db).pack(pady=10)
+        ttk.Button(self, text="Restore from Selected Backup", command=self.restore_db).pack(pady=10)
+
+        # Backup List
+        self.backup_list = ttk.Treeview(self, columns=("file", "date"), show="headings", height=8)
+        self.backup_list.heading("file", text="Backup File")
+        self.backup_list.heading("date", text="Created At")
+        self.backup_list.column("file", width=300)
+        self.backup_list.column("date", width=150)
+        self.backup_list.pack(fill="x", padx=10, pady=5)
 
         # Status Label
         self.status_label = ttk.Label(self, text="", foreground="blue")
         self.status_label.pack(pady=5)
 
-    def backup_db(self):
+    def refresh_backup_list(self):
+        for r in self.backup_list.get_children():
+            self.backup_list.delete(r)
+        backups = sorted(os.listdir(BACKUP_DIR), reverse=True)
+        for f in backups:
+            path = os.path.join(BACKUP_DIR, f)
+            created = datetime.fromtimestamp(os.path.getctime(path)).strftime("%Y-%m-%d %H:%M:%S")
+            self.backup_list.insert("", "end", values=(f, created))
+
+    # Automatic backup inside backups/
+    def backup_db_auto(self):
         try:
             db_path = db.get_db_path()
-            if not os.path.exists(db_path):
-                self.status_label.config(text="Database file not found!", foreground="red")
-                return
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
+            shutil.copy2(db_path, dest)
 
-            # Ask where to save
+            # Remove older backups if exceeding MAX_BACKUPS
+            backups = sorted(os.listdir(BACKUP_DIR))
+            while len(backups) > MAX_BACKUPS:
+                oldest = backups.pop(0)
+                os.remove(os.path.join(BACKUP_DIR, oldest))
+
+            self.status_label.config(text=f"Backup created: {dest}", foreground="green")
+            self.refresh_backup_list()
+        except Exception as e:
+            self.status_label.config(text=f"Backup failed: {e}", foreground="red")
+
+    # Manual backup with save-as dialog
+    def backup_db_manual(self):
+        try:
+            db_path = db.get_db_path()
             save_path = filedialog.asksaveasfilename(
                 defaultextension=".sqlite",
                 filetypes=[("SQLite Database", "*.sqlite")],
@@ -40,20 +79,21 @@ class BackupRestoreFrame(ttk.Frame):
             )
             if not save_path:
                 return
-
             shutil.copy2(db_path, save_path)
             self.status_label.config(text=f"Backup saved to {save_path}", foreground="green")
+            self.refresh_backup_list()
         except Exception as e:
             self.status_label.config(text=f"Backup failed: {e}", foreground="red")
 
+    # Restore selected backup
     def restore_db(self):
         try:
-            restore_path = filedialog.askopenfilename(
-                title="Select Backup File",
-                filetypes=[("SQLite Database", "*.sqlite")]
-            )
-            if not restore_path:
+            sel = self.backup_list.selection()
+            if not sel:
+                messagebox.showinfo("Select Backup", "Please select a backup from the list to restore.")
                 return
+            backup_file = self.backup_list.item(sel[0])["values"][0]
+            restore_path = os.path.join(BACKUP_DIR, backup_file)
 
             confirm = messagebox.askyesno("Confirm Restore",
                                           "Restoring will overwrite your current database. Continue?")
@@ -62,7 +102,6 @@ class BackupRestoreFrame(ttk.Frame):
 
             db_path = db.get_db_path()
             shutil.copy2(restore_path, db_path)
-            self.status_label.config(text="Database restored successfully. Restart app to apply changes.",
-                                     foreground="green")
+            self.status_label.config(text="Database restored successfully. Restart app to apply changes.", foreground="green")
         except Exception as e:
             self.status_label.config(text=f"Restore failed: {e}", foreground="red")
