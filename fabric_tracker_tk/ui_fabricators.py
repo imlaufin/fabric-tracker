@@ -81,7 +81,12 @@ class KnittingTab(ttk.Frame):
             WHERE delivered_to=? ORDER BY date DESC
         """, (self.fabricator["name"],))
         for row in cur.fetchall():
-            self.tx_tree.insert("", "end", values=(row["date"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
+            display_date = row["date"]
+            try:
+                display_date = db.db_to_ui_date(row["date"])
+            except Exception:
+                pass
+            self.tx_tree.insert("", "end", values=(display_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
         conn.close()
 
     def load_batches(self):
@@ -104,8 +109,14 @@ class KnittingTab(ttk.Frame):
             return
         vals = self.batch_tree.item(sel[0])["values"]
         batch_ref = vals[0]
-        if self.controller and hasattr(self.controller, "open_dyeing_tab_for_batch"):
-            self.controller.open_dyeing_tab_for_batch(self.fabricator["name"], batch_ref)
+        # find if this batch was sent to a dyeer (via purchases entries)
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT delivered_to FROM purchases WHERE batch_id=? AND delivered_to IS NOT NULL AND delivered_to != '' LIMIT 1", (batch_ref,))
+        row = cur.fetchone()
+        conn.close()
+        if row and self.controller and hasattr(self.controller, "open_dyeing_tab_for_batch"):
+            self.controller.open_dyeing_tab_for_batch(row["delivered_to"], batch_ref)
 
     def create_batch_dialog(self):
         dialog = tk.Toplevel(self)
@@ -271,35 +282,80 @@ class FabricatorsFrame(ttk.Frame):
         self.parent_nb.pack(fill="both", expand=True)
 
     def build_tabs(self):
+        # remove all previous content
         for child in self.parent_nb.winfo_children():
             child.destroy()
 
-        # Fetch all fabricators from suppliers table
+        # Knitting and Dyeing parent frames
+        kn_parent = ttk.Frame(self.parent_nb)
+        dy_parent = ttk.Frame(self.parent_nb)
+        self.parent_nb.add(kn_parent, text="Knitting Units")
+        self.parent_nb.add(dy_parent, text="Dyeing Units")
+
+        # create sub-notebooks (one for knitting units, one for dyeing units)
+        kn_nb = ttk.Notebook(kn_parent)
+        kn_nb.pack(fill="both", expand=True)
+        dy_nb = ttk.Notebook(dy_parent)
+        dy_nb.pack(fill="both", expand=True)
+
+        self.kn_nb = kn_nb
+        self.dy_nb = dy_nb
+        self.tabs = {}
+
+        # fetch fabricators
         knitting_units = db.get_fabricators("knitting_unit")
         dyeing_units = db.get_fabricators("dyeing_unit")
 
-        self.tabs = {}
-        kn_tab_frame = ttk.Frame(self.parent_nb)
-        self.parent_nb.add(kn_tab_frame, text="Knitting Units")
-        dy_tab_frame = ttk.Frame(self.parent_nb)
-        self.parent_nb.add(dy_tab_frame, text="Dyeing Units")
+        # add knitting units as individual tabs
+        for r in knitting_units:
+            tab = KnittingTab(kn_nb, r, controller=self.controller)
+            kn_nb.add(tab, text=r["name"])
+            # store reference
+            if r["name"] not in self.tabs:
+                self.tabs[r["name"]] = {}
+            self.tabs[r["name"]]["knitting"] = tab
 
-        for f in knitting_units:
-            kn_tab = KnittingTab(kn_tab_frame, f, controller=self.controller)
-            kn_tab.pack(fill="both", expand=True)
-            self.tabs[f["name"]] = {"knitting": kn_tab}
-
-        for f in dyeing_units:
-            dy_tab = DyeingTab(dy_tab_frame, f, controller=self.controller)
-            dy_tab.pack(fill="both", expand=True)
-            if f["name"] in self.tabs:
-                self.tabs[f["name"]]["dyeing"] = dy_tab
-            else:
-                self.tabs[f["name"]] = {"dyeing": dy_tab}
+        # add dyeing units as individual tabs
+        for r in dyeing_units:
+            tab = DyeingTab(dy_nb, r, controller=self.controller)
+            dy_nb.add(tab, text=r["name"])
+            if r["name"] not in self.tabs:
+                self.tabs[r["name"]] = {}
+            self.tabs[r["name"]]["dyeing"] = tab
 
     def open_dyeing_tab_for_batch(self, fabricator_name, batch_ref):
-        idx = self.parent_nb.index("end") - 1  # last tab is Dyeing Units
-        self.parent_nb.select(idx)  # switch to Dyeing Units
-        dy_tab = self.tabs.get(fabricator_name, {}).get("dyeing")
-        if dy_tab:
-            dy_tab.reload_all()
+        # switch to Dyeing Units parent tab
+        # find the parent tab index for "Dyeing Units"
+        for ptab in self.parent_nb.tabs():
+            if self.parent_nb.tab(ptab, "text") == "Dyeing Units":
+                self.parent_nb.select(ptab)
+                break
+
+        # now select the dyeing sub-tab matching fabricator_name
+        if not hasattr(self, "dy_nb"):
+            return
+        for st in self.dy_nb.tabs():
+            if self.dy_nb.tab(st, "text") == fabricator_name:
+                # select the subtab
+                self.dy_nb.select(st)
+                widget = self.dy_nb.nametowidget(st)
+                if hasattr(widget, "reload_all"):
+                    widget.reload_all()
+                # highlight matching batch rows in pending/completed
+                try:
+                    # pending
+                    for item in widget.pending_tree.get_children():
+                        vals = widget.pending_tree.item(item)["values"]
+                        if vals and vals[0] == batch_ref:
+                            widget.pending_tree.selection_set(item)
+                            widget.pending_tree.see(item)
+                    # completed
+                    for item in widget.completed_tree.get_children():
+                        vals = widget.completed_tree.item(item)["values"]
+                        if vals and vals[0] == batch_ref:
+                            widget.completed_tree.selection_set(item)
+                            widget.completed_tree.see(item)
+                except Exception:
+                    pass
+                return
+        messagebox.showinfo("Not found", f"Dyeing unit '{fabricator_name}' not found.")
