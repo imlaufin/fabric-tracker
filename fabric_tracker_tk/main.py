@@ -1,4 +1,3 @@
-# main.py
 import tkinter as tk
 from tkinter import ttk
 import db
@@ -7,7 +6,7 @@ from ui_entries import EntriesFrame
 from ui_masters import MastersFrame
 from ui_fabricators import FabricatorsFrame
 from reports import ReportsFrame
-from backup_restore import BackupRestoreFrame  # <-- backup/restore UI
+from backup_restore import BackupRestoreFrame  # import the backup/restore UI
 
 class FabricTrackerApp(tk.Tk):
     def __init__(self):
@@ -25,15 +24,15 @@ class FabricTrackerApp(tk.Tk):
         self.fabricators_frame = FabricatorsFrame(self.notebook, controller=self)
         self.masters_frame = MastersFrame(self.notebook, controller=self, on_change_callback=self.reload_fabricators)
         self.reports_frame = ReportsFrame(self.notebook, self)
-        self.backup_frame = BackupRestoreFrame(self.notebook, self)  # <-- backup/restore tab
+        self.backup_frame = BackupRestoreFrame(self.notebook, controller=self)  # create backup/restore tab
 
-        # add frames to notebook
+        # add to notebook
         self.notebook.add(self.entries_frame, text="Entries")
         self.notebook.add(self.dashboard_frame, text="Dashboard")
         self.notebook.add(self.fabricators_frame, text="Fabricators")
         self.notebook.add(self.masters_frame, text="Masters")
         self.notebook.add(self.reports_frame, text="Reports")
-        self.notebook.add(self.backup_frame, text="Backup / Restore")  # <-- add backup tab
+        self.notebook.add(self.backup_frame, text="Backup & Restore")  # add the new tab
 
     def reload_fabricators(self):
         # called when Masters change
