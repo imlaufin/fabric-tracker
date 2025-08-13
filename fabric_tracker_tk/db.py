@@ -36,15 +36,11 @@ def get_connection():
 # DB Initialization / Migrations
 # ----------------------------
 def init_db():
-    """
-    Initialize DB and perform migrations. Backup current DB before changes.
-    """
     created = False
     if not os.path.exists(get_db_path()):
         open(get_db_path(), "w").close()
         created = True
 
-    # backup first
     backup = backup_db()
     print(f"[DB] Backup created at {backup}")
 
@@ -143,17 +139,35 @@ def db_to_ui_date(db_date: str) -> str:
     return dt.strftime("%d/%m/%Y")
 
 def ui_to_db_date(ui_date: str) -> str:
-    """Convert UI date (dd/mm/yyyy) to DB date (yyyy-mm-dd)."""
+    """Convert flexible UI date (d/m/yy or d-m-yy or d/m or d-m) to DB date (yyyy-mm-dd)."""
     if not ui_date:
         return ""
-    dt = datetime.strptime(ui_date, "%d/%m/%Y")
-    return dt.strftime("%Y-%m-%d")
+    ui_date = ui_date.replace("-", "/").strip()
+    parts = ui_date.split("/")
+    day, month, year = 0, 0, 0
+    try:
+        if len(parts) == 2:
+            day, month = int(parts[0]), int(parts[1])
+            year = datetime.now().year
+        elif len(parts) == 3:
+            day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+            if year < 100:  # two-digit year
+                current_year = datetime.now().year
+                century = current_year // 100
+                year += century * 100
+                if year > current_year + 20:  # if in future by too much, assume previous century
+                    year -= 100
+        else:
+            raise ValueError(f"Cannot parse date: {ui_date}")
+        dt = datetime(year, month, day)
+        return dt.strftime("%Y-%m-%d")
+    except Exception as e:
+        raise ValueError(f"Invalid date '{ui_date}': {e}")
 
 # ----------------------------
 # Supplier / Masters Handling
 # ----------------------------
 def list_suppliers(supplier_type=None):
-    """Return list of suppliers, optionally filtered by type."""
     conn = get_connection()
     cur = conn.cursor()
     if supplier_type:
@@ -193,7 +207,6 @@ def list_yarn_types():
 # Fabricators / Batches / Lots
 # ----------------------------
 def get_fabricators(fab_type):
-    """Return list of suppliers of given type: 'knitting_unit' or 'dyeing_unit'"""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM suppliers WHERE type=? ORDER BY name", (fab_type,))
