@@ -7,28 +7,41 @@ from datetime import datetime
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 
+# ----------------------------
+# Backup / Restore Utilities
+# ----------------------------
+def get_db_path():
+    """Return full path to the SQLite database."""
+    return os.path.join(os.path.dirname(__file__), DB_PATH)
+
 def backup_db():
+    """Create a timestamped backup of the DB."""
     if not os.path.exists(BACKUP_DIR):
         os.makedirs(BACKUP_DIR)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
-    if os.path.exists(DB_PATH):
-        shutil.copy2(DB_PATH, dest)
+    if os.path.exists(get_db_path()):
+        shutil.copy2(get_db_path(), dest)
     return dest
 
+# ----------------------------
+# Database Connection
+# ----------------------------
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     return conn
 
+# ----------------------------
+# DB Initialization / Migrations
+# ----------------------------
 def init_db():
     """
-    Initialize DB and perform migrations. Backups current DB before changes.
+    Initialize DB and perform migrations. Backup current DB before changes.
     """
-    # ensure db file exists
     created = False
-    if not os.path.exists(DB_PATH):
-        open(DB_PATH, "w").close()
+    if not os.path.exists(get_db_path()):
+        open(get_db_path(), "w").close()
         created = True
 
     # backup first
@@ -38,12 +51,12 @@ def init_db():
     conn = get_connection()
     cur = conn.cursor()
 
-    # --- core existing tables: purchases, suppliers, yarn_types ---
+    # Core tables
     cur.execute("""
     CREATE TABLE IF NOT EXISTS suppliers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE,
-        type TEXT DEFAULT 'yarn_supplier',  -- yarn_supplier / knitting_unit / dyeing_unit
+        type TEXT DEFAULT 'yarn_supplier',
         color_code TEXT DEFAULT ''
     )
     """)
@@ -68,15 +81,15 @@ def init_db():
     )
     """)
 
-    # --- new tables for batches, lots, transactions linking to fabricators ---
+    # Batches and lots
     cur.execute("""
     CREATE TABLE IF NOT EXISTS batches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        batch_ref TEXT,                 -- user visible batch id (e.g., "200")
-        fabricator_id INTEGER,          -- masters id
+        batch_ref TEXT,
+        fabricator_id INTEGER,
         product_name TEXT,
         expected_lots INTEGER DEFAULT 0,
-        composition TEXT,               -- free-text composition
+        composition TEXT,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(fabricator_id) REFERENCES suppliers(id)
     )
@@ -85,19 +98,18 @@ def init_db():
     CREATE TABLE IF NOT EXISTS lots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         batch_id INTEGER,
-        lot_no TEXT,            -- e.g., "200/1"
-        lot_index INTEGER,      -- 1,2,3...
+        lot_no TEXT,
+        lot_index INTEGER,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
     """)
-
-    # table to record dyeing outputs / returns (so we can link original knitter records)
+    # Dyeing outputs
     cur.execute("""
     CREATE TABLE IF NOT EXISTS dyeing_outputs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lot_id INTEGER,
-        dyeing_unit_id INTEGER,    -- supplier.id for dyeing unit
+        dyeing_unit_id INTEGER,
         returned_date TEXT,
         returned_qty_kg REAL,
         returned_qty_rolls INTEGER,
@@ -107,24 +119,47 @@ def init_db():
     )
     """)
 
-    # index hints (speed up queries)
+    # Index hints
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
 
     conn.commit()
     conn.close()
+
     if created:
         print("[DB] New DB created and initialized.")
     else:
         print("[DB] DB init/migrations complete.")
 
-# Helper convenience queries used by UI
-def get_fabricators(fab_type):
-    """Return list of suppliers of given type: 'knitting_unit' or 'dyeing_unit'"""
+# ----------------------------
+# Date Conversion Helpers
+# ----------------------------
+def db_to_ui_date(db_date: str) -> str:
+    """Convert DB date (yyyy-mm-dd) to UI date (dd/mm/yyyy)."""
+    if not db_date:
+        return ""
+    dt = datetime.strptime(db_date, "%Y-%m-%d")
+    return dt.strftime("%d/%m/%Y")
+
+def ui_to_db_date(ui_date: str) -> str:
+    """Convert UI date (dd/mm/yyyy) to DB date (yyyy-mm-dd)."""
+    if not ui_date:
+        return ""
+    dt = datetime.strptime(ui_date, "%d/%m/%Y")
+    return dt.strftime("%Y-%m-%d")
+
+# ----------------------------
+# Supplier / Masters Handling
+# ----------------------------
+def list_suppliers(supplier_type=None):
+    """Return list of suppliers, optionally filtered by type."""
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM suppliers WHERE type=? ORDER BY name", (fab_type,))
+    if supplier_type:
+        cur.execute("SELECT id, name, color_code FROM suppliers WHERE type=? ORDER BY name", (supplier_type,))
+    else:
+        cur.execute("SELECT id, name, type, color_code FROM suppliers ORDER BY name")
     rows = cur.fetchall()
     conn.close()
     return rows
@@ -142,6 +177,29 @@ def update_master_color_and_type(name, mtype, color_hex):
     cur.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
     conn.commit()
     conn.close()
+
+# ----------------------------
+# Yarn Types
+# ----------------------------
+def list_yarn_types():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT name FROM yarn_types")
+    rows = [r["name"] for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+# ----------------------------
+# Fabricators / Batches / Lots
+# ----------------------------
+def get_fabricators(fab_type):
+    """Return list of suppliers of given type: 'knitting_unit' or 'dyeing_unit'"""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM suppliers WHERE type=? ORDER BY name", (fab_type,))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 def get_batches_for_fabricator(fabricator_id):
     conn = get_connection()
@@ -166,7 +224,6 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
 def create_lot(batch_id, lot_index):
     conn = get_connection()
     cur = conn.cursor()
-    # get batch_ref for forming lot_no
     cur.execute("SELECT batch_ref FROM batches WHERE id=?", (batch_id,))
     row = cur.fetchone()
     batch_ref = row["batch_ref"] if row else str(batch_id)
@@ -177,22 +234,27 @@ def create_lot(batch_id, lot_index):
     conn.close()
     return lid
 
+# ----------------------------
+# Purchases / Dyeing Outputs
+# ----------------------------
 def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes=""):
     conn = get_connection()
     cur = conn.cursor()
+    db_date = ui_to_db_date(date)
     cur.execute("""
         INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes))
+    """, (db_date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to, notes))
     conn.commit()
     conn.close()
 
 def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
     conn = get_connection()
     cur = conn.cursor()
+    db_date = ui_to_db_date(returned_date)
     cur.execute("""
         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes))
+    """, (lot_id, dyeing_unit_id, db_date, returned_qty_kg, returned_qty_rolls, notes))
     conn.commit()
     conn.close()
