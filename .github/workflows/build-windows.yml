@@ -26,7 +26,13 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
-        run: pyinstaller --clean --onefile --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --collect-submodules fabric_tracker_tk --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
+        run: |
+          pyinstaller --clean --onefile \
+            --collect-submodules fabric_tracker_tk \
+            --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" \
+            --log-level DEBUG \
+            fabric_tracker_tk/main.py \
+            --name fabric_tracker
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
