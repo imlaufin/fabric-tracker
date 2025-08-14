@@ -1,4 +1,3 @@
-# ui_masters.py
 import tkinter as tk
 from tkinter import ttk, messagebox, colorchooser
 import db
@@ -73,19 +72,16 @@ class MastersFrame(ttk.Frame):
         mtype = type_map.get(type_label, "yarn_supplier")
         color_hex = getattr(self, "chosen_color", "")
 
-        # Add/update based on type
         if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
             db.add_master(name, mtype, color_hex)
             db.update_master_color_and_type(name, mtype, color_hex)
         elif mtype == "yarn_type":
             db.add_yarn_type(name)
         elif mtype == "fabric_type":
-            # Future-proof: use add_master with type 'fabric_type'
             db.add_master(name, mtype, "")
 
         messagebox.showinfo("Saved", f"{name} saved/updated.")
 
-        # Reset form
         self.name_entry.delete(0, tk.END)
         self.type_cb.current(0)
         self.chosen_color = ""
@@ -97,18 +93,27 @@ class MastersFrame(ttk.Frame):
     def load_masters(self):
         for r in self.tree.get_children():
             self.tree.delete(r)
-        # Load suppliers
+
         for t in MASTER_TYPES:
             mtype = t[1]
+
             if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit", "fabric_type"):
                 rows = db.list_suppliers(mtype if mtype != "fabric_type" else None)
                 for row in rows:
-                    type_label = next((t[0] for t in MASTER_TYPES if t[1] == row["type"]), row["type"])
+                    name = row.get("name", "")
+                    typ = row.get("type", mtype)
                     color = row.get("color_code", "") if "color_code" in row.keys() else ""
-                    self.tree.insert("", "end", values=(row["name"], type_label, color))
+                    # Skip invalid entries
+                    if not name:
+                        continue
+                    type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
+                    self.tree.insert("", "end", values=(name, type_label, color))
+
             elif mtype == "yarn_type":
                 rows = db.list_yarn_types()
                 for yname in rows:
+                    if not yname:
+                        continue
                     self.tree.insert("", "end", values=(yname, t[0], ""))
 
     def delete_selected(self):
@@ -135,7 +140,6 @@ class MastersFrame(ttk.Frame):
         vals = self.tree.item(sel[0])["values"]
         name, typelabel, color = vals
 
-        # Prefill form
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
 
@@ -145,7 +149,6 @@ class MastersFrame(ttk.Frame):
         except Exception:
             self.type_cb.current(0)
 
-        # Color only for suppliers
         if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
             self.chosen_color = color or ""
             self.color_btn.configure(text=color or "Choose", style="TButton")
