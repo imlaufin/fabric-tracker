@@ -180,3 +180,7 @@ class MastersFrame(ttk.Frame):
         else:
             self.chosen_color = ""
             self.color_btn.configure(text="Choose", style="TButton")
+
+    def reload_cb_and_notify(self):
+        if self.on_change_callback:
+            self.on_change_callback()
