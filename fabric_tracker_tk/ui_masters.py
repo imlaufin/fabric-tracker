@@ -91,30 +91,30 @@ class MastersFrame(ttk.Frame):
         self.reload_cb_and_notify()
 
     def load_masters(self):
-    for r in self.tree.get_children():
-        self.tree.delete(r)
+        for r in self.tree.get_children():
+            self.tree.delete(r)
 
-    for t in MASTER_TYPES:
-        mtype = t[1]
+        for t in MASTER_TYPES:
+            mtype = t[1]
 
-        if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit", "fabric_type"):
-            rows = db.list_suppliers(mtype if mtype != "fabric_type" else None)
-            for row in rows:
-                try:
-                    name = row["name"]
-                    typ = row["type"] if "type" in row.keys() else mtype
-                    color = row["color_code"] if "color_code" in row.keys() else ""
-                    type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
-                    self.tree.insert("", "end", values=(name, type_label, color))
-                except KeyError:
-                    continue  # skip invalid rows
+            if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit", "fabric_type"):
+                rows = db.list_suppliers(mtype if mtype != "fabric_type" else None)
+                for row in rows:
+                    try:
+                        name = row["name"]
+                        typ = row["type"] if "type" in row.keys() else mtype
+                        color = row["color_code"] if "color_code" in row.keys() else ""
+                        type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
+                        self.tree.insert("", "end", values=(name, type_label, color))
+                    except KeyError:
+                        continue  # skip invalid rows
 
-        elif mtype == "yarn_type":
-            rows = db.list_yarn_types()
-            for yname in rows:
-                if not yname:
-                    continue
-                self.tree.insert("", "end", values=(yname, t[0], ""))
+            elif mtype == "yarn_type":
+                rows = db.list_yarn_types()
+                for yname in rows:
+                    if not yname:
+                        continue
+                    self.tree.insert("", "end", values=(yname, t[0], ""))
 
     def delete_selected(self):
         sel = self.tree.selection()
