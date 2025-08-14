@@ -3,7 +3,7 @@ import os
 import shutil
 from datetime import datetime
 
-DB_PATH = "fabric.db"
+DB_PATH = "fabric_tracker.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
