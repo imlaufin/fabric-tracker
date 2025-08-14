@@ -16,6 +16,7 @@ class MastersFrame(ttk.Frame):
         self.controller = controller
         self.on_change_callback = on_change_callback
         self.chosen_color = ""
+        self.color_imgs = {}  # store small color rectangles for treeview
         self.build_ui()
         self.load_masters()
 
@@ -46,10 +47,23 @@ class MastersFrame(ttk.Frame):
         self.tree.heading("color", text="Color")
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Right-click context menu
+        self.menu = tk.Menu(self, tearoff=0)
+        self.menu.add_command(label="Edit", command=self.edit_selected)
+        self.menu.add_command(label="Delete", command=self.delete_selected)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+
+        # Bottom buttons
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=10)
         ttk.Button(btns, text="Delete Selected", command=self.delete_selected).pack(side="left")
         ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=8)
+
+    def show_context_menu(self, event):
+        selected = self.tree.identify_row(event.y)
+        if selected:
+            self.tree.selection_set(selected)
+            self.menu.post(event.x_root, event.y_root)
 
     def choose_color(self):
         color = colorchooser.askcolor(title="Choose color")
@@ -95,6 +109,8 @@ class MastersFrame(ttk.Frame):
         for r in self.tree.get_children():
             self.tree.delete(r)
 
+        self.color_imgs.clear()
+
         for t in MASTER_TYPES:
             mtype = t[1]
             rows = []
@@ -112,7 +128,14 @@ class MastersFrame(ttk.Frame):
                     typ = row["type"] if "type" in row.keys() else mtype
                     color = row["color_code"] if "color_code" in row.keys() else ""
                     type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
-                    self.tree.insert("", "end", values=(name, type_label, color))
+
+                    # Create a small color rectangle for display
+                    img = None
+                    if color:
+                        img = tk.PhotoImage(width=16, height=16)
+                        img.put(color, to=(0,0,16,16))
+                        self.color_imgs[name] = img  # keep a reference
+                    self.tree.insert("", "end", values=(name, type_label, ""), image=img)
                 except KeyError:
                     continue
 
