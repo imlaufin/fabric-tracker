@@ -6,7 +6,7 @@ from datetime import datetime
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
-DEFAULT_NAMES = ["Default Knitting Unit", "Default Dyeing Unit"]
+DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
 
 # ----------------------------
 # Backup / Restore Utilities
@@ -142,14 +142,14 @@ def init_db():
 
     conn.commit()
 
-    # Default suppliers / units
-    for unit_name, unit_type in [
-        ("Default Knitting Unit", "knitting_unit"),
-        ("Default Dyeing Unit", "dyeing_unit")
-    ]:
-        cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
-        if not cur.fetchone():
-            cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
+   # Default suppliers / units
+for unit_name, unit_type in [
+    ("Shiv Fabrics", "knitting_unit"),
+    ("Oswal Finishing Mills", "dyeing_unit")
+]:
+    cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
+    if not cur.fetchone():
+        cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
     conn.commit()
     conn.close()
     print("[DB] New DB created and initialized." if created else "[DB] DB init/migrations complete.")
