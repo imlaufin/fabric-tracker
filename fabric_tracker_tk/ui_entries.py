@@ -7,21 +7,21 @@ from fabric_tracker_tk import db
 # ---------------- Autocomplete Combobox ----------------
 class AutocompleteCombobox(ttk.Combobox):
     """
-    Drop-in ttk.Combobox with type-ahead filtering and autocompletion.
-    Typing filters the dropdown to items that start with the typed text
-    (case-insensitive). Pressing Enter or leaving focus keeps current text.
+    ttk.Combobox with live filtering.
+    - Typing filters dropdown items (case-insensitive, startswith match)
+    - If exactly one match, auto-completes
+    - Allows free text not in the master list
     """
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
         self._all_values = []
         self._casefold_values = []
         self._last_typed = ""
+        self._nav_keys = {"Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown"}
         self.bind("<KeyRelease>", self._on_keyrelease, add="+")
         self.bind("<<ComboboxSelected>>", self._on_select, add="+")
         self.bind("<FocusIn>", self._on_focusin, add="+")
         self.bind("<FocusOut>", self._on_focusout, add="+")
-        # Allow navigation keys without refiltering
-        self._nav_keys = {"Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown"}
 
     def set_completion_list(self, values):
         self._all_values = list(values or [])
@@ -29,55 +29,44 @@ class AutocompleteCombobox(ttk.Combobox):
         self["values"] = self._all_values
 
     def _on_focusin(self, _e):
-        # Select all text for quick overwrite
         self.after_idle(lambda: self.select_range(0, tk.END))
 
     def _on_focusout(self, _e):
-        # On focus out, if text is a prefix of any item, snap to first match
+        # If leaving field and text is empty, do nothing
         txt = self.get().strip()
         if not txt:
             return
-        match = self._first_prefix_match(txt)
-        if match:
-            self.set(match)
+        # Keep text as-is (do not force snap) so free entries are allowed
 
     def _on_select(self, _e):
-        # When chosen from dropdown, keep full list ready next time
         self["values"] = self._all_values
 
     def _on_keyrelease(self, e):
         if e.keysym in self._nav_keys:
             return
+
         txt = self.get()
         if not txt:
             self["values"] = self._all_values
             return
 
-        # Filter by startswith (case-insensitive)
         cf = txt.casefold()
         matches = [orig for (orig, c) in self._casefold_values if c.startswith(cf)]
 
-        # Update dropdown
+        # Update dropdown list
         self["values"] = matches if matches else self._all_values
 
-        # Soft autocomplete when there is a single clear best match
-        if matches:
-            # Fill with first match while keeping user's typed prefix selected
+        # Only auto-fill if exactly 1 match AND not deleting
+        if len(matches) == 1 and e.keysym != "BackSpace":
             self.set(matches[0])
             self.icursor(len(txt))
             self.select_range(len(txt), tk.END)
 
-        # If user typed something new, try to open the dropdown to show options
+        # Show dropdown when typing new characters
         if txt != self._last_typed:
             self.event_generate("<Down>")
         self._last_typed = txt
 
-    def _first_prefix_match(self, prefix):
-        cf = prefix.casefold()
-        for orig, c in self._casefold_values:
-            if c.startswith(cf):
-                return orig
-        return None
 
 
 class EntriesFrame(ttk.Frame):
@@ -348,72 +337,74 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def save_purchase(self):
-        date = self.date_e.get().strip()
-        batch = self.batch_e.get().strip()
-        lot = self.lot_e.get().strip()
-        supplier = self.supplier_cb.get().strip()
-        yarn = self.yarn_cb.get().strip()
-        delivered = self.delivered_cb.get().strip()
+    date = self.date_e.get().strip()
+    batch = self.batch_e.get().strip()
+    lot = self.lot_e.get().strip()
+    supplier = self.supplier_cb.get().strip()
+    yarn = self.yarn_cb.get().strip()
+    delivered = self.delivered_cb.get().strip()
+
+    try:
+        kg = float(self.kg_e.get().strip() or 0)
+        rolls = int(self.rolls_e.get().strip() or 0)
+        price = float(self.price_e.get().strip() or 0)
+    except ValueError:
+        messagebox.showerror("Invalid", "Qty or Price must be numeric")
+        return
+
+    if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
+        messagebox.showwarning("Missing", "Please fill required fields")
+        return
+
+    # Snap delivered-to to first matching master (autocomplete behavior)
+    self._snap_autocomplete(self.delivered_cb)
+    delivered = self.delivered_cb.get().strip()
+
+    # Auto-add Delivered To if new
+    if delivered and delivered not in list(self.delivered_cb["values"]):
+        self._ensure_supplier_exists(delivered, supplier_type="supplier")
+
+    # Auto-add Supplier if new
+    if supplier and supplier not in list(self.supplier_cb["values"]):
+        self._ensure_supplier_exists(supplier, supplier_type="supplier")
+
+    # Auto-add Yarn if new
+    if yarn and yarn not in list(self.yarn_cb["values"]):
+        self._ensure_yarn_type_exists(yarn)
+
+    try:
+        if self.selected_purchase_id:
+            db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+        else:
+            db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+    except ValueError as e:
+        messagebox.showerror("Invalid Date", str(e))
+        return
+
+    # Remember values for bulk entries (preserve on clear)
+    self._last_purchase_defaults.update({
+        "date": date,
+        "batch": batch,
+        "supplier": supplier,
+        "yarn": yarn,
+        "price": self.price_e.get().strip(),
+        "delivered": delivered,
+    })
+
+    # Update dropdown lists so the new masters are immediately available
+    self.refresh_lists()
+    self.reload_entries()
+
+    # Clear only fields that change per item (Lot/Qty), keep the rest
+    self.clear_purchase_form(keep_defaults=True)
+
+    self.selected_purchase_id = None
+
+    if self.controller and hasattr(self.controller, "fabricators_frame"):
         try:
-            kg = float(self.kg_e.get().strip() or 0)
-            rolls = int(self.rolls_e.get().strip() or 0)
-            price = float(self.price_e.get().strip() or 0)
-        except ValueError:
-            messagebox.showerror("Invalid", "Qty or Price must be numeric")
-            return
-
-        if not date or not yarn or (kg==0 and rolls==0) or not delivered:
-            messagebox.showwarning("Missing", "Please fill required fields")
-            return
-
-        # Snap delivered-to to first matching master (autocomplete behavior)
-        self._snap_autocomplete(self.delivered_cb)
-        delivered = self.delivered_cb.get().strip()
-
-        # Validate delivered-to exists in Masters (as requested)
-        if delivered not in list(self.delivered_cb["values"]):
-            messagebox.showerror("Invalid Delivered To", f"'{delivered}' must be in Masters list")
-            return
-
-        # Ensure masters exist for supplier and yarn type (auto-add)
-        if supplier and supplier not in list(self.supplier_cb["values"]):
-            self._ensure_supplier_exists(supplier, supplier_type="supplier")
-        if yarn and yarn not in list(self.yarn_cb["values"]):
-            self._ensure_yarn_type_exists(yarn)
-
-        try:
-            if self.selected_purchase_id:
-                db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
-            else:
-                db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
-        except ValueError as e:
-            messagebox.showerror("Invalid Date", str(e))
-            return
-
-        # Remember values for bulk entries (preserve on clear)
-        self._last_purchase_defaults.update({
-            "date": date,
-            "batch": batch,
-            "supplier": supplier,
-            "yarn": yarn,
-            "price": self.price_e.get().strip(),
-            "delivered": delivered,
-        })
-
-        # Update dropdown lists so the new masters are immediately available
-        self.refresh_lists()
-        self.reload_entries()
-
-        # Clear only fields that change per item (Lot/Qty), keep the rest
-        self.clear_purchase_form(keep_defaults=True)
-
-        self.selected_purchase_id = None
-
-        if self.controller and hasattr(self.controller, "fabricators_frame"):
-            try:
-                self.controller.fabricators_frame.build_tabs()
-            except Exception:
-                pass
+            self.controller.fabricators_frame.build_tabs()
+        except Exception:
+            pass
 
     def clear_purchase_form(self, keep_defaults=True):
         """If keep_defaults=True, preserve date/batch/supplier/yarn/price/delivered."""
