@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, colorchooser
-import db
+from fabric_tracker_tk import db
 
 MASTER_TYPES = [
     ("Yarn Supplier", "yarn_supplier"),
