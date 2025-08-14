@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, filedialog
 from openpyxl import Workbook
-import db
+from fabric_tracker_tk import db
 from datetime import datetime
 
 class ReportsFrame(ttk.Frame):
