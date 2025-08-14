@@ -26,12 +26,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
-        run: |
-          # Collect all .py files in fabric_tracker_tk
-          $hiddenImports = (Get-ChildItem -Recurse -Filter '*.py' -Path fabric_tracker_tk | ForEach-Object { '--hidden-import ' + $_.FullName.Replace('\','.') -replace '\.py$','' }) -join ' '
-
-          # Run PyInstaller
-          pyinstaller --clean --onefile --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" $hiddenImports --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
+        run: pyinstaller --clean --onefile --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --collect-submodules fabric_tracker_tk --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
