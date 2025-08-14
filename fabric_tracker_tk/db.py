@@ -4,38 +4,44 @@ import sys
 import shutil
 from datetime import datetime
 
-DB_PATH = "fabric_tracker.db"
+APP_NAME = "FabricTracker"
+DB_NAME = "fabric_tracker.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
+
+# Define persistent database path
+if os.name == 'nt':  # Windows
+    BASE_DIR = os.path.join(os.getenv('APPDATA'), APP_NAME)
+else:  # Linux/Mac
+    BASE_DIR = os.path.join(os.path.expanduser('~'), '.' + APP_NAME.lower())
+os.makedirs(BASE_DIR, exist_ok=True)
+DB_PATH = os.path.join(BASE_DIR, DB_NAME)
+
+# Backup directory in persistent location
+BACKUP_PATH = os.path.join(BASE_DIR, BACKUP_DIR)
 
 # ----------------------------
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
     """
-    Returns the path to the database file.
-    Works both in dev (script) and PyInstaller exe.
+    Returns the path to the database file in a persistent location.
     """
-    if getattr(sys, 'frozen', False):
-        # Running as PyInstaller bundle
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.dirname(__file__)
-    return os.path.join(base_path, DB_PATH)
+    return DB_PATH
 
 def backup_db():
-    if not os.path.exists(BACKUP_DIR):
-        os.makedirs(BACKUP_DIR)
+    if not os.path.exists(BACKUP_PATH):
+        os.makedirs(BACKUP_PATH)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
+    dest = os.path.join(BACKUP_PATH, f"fabric_backup_{ts}.db")
     if os.path.exists(get_db_path()):
         shutil.copy2(get_db_path(), dest)
-    backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("fabric_backup_")])
+    backups = sorted([f for f in os.listdir(BACKUP_PATH) if f.startswith("fabric_backup_")])
     while len(backups) > MAX_BACKUPS:
         old_backup = backups.pop(0)
         try:
-            os.remove(os.path.join(BACKUP_DIR, old_backup))
+            os.remove(os.path.join(BACKUP_PATH, old_backup))
         except Exception:
             pass
     return dest
@@ -164,7 +170,6 @@ def init_db():
     conn.commit()
     conn.close()
     print("[DB] New DB created and initialized." if created else "[DB] DB init/migrations complete.")
-
 
 # ----------------------------
 # Date Helpers
