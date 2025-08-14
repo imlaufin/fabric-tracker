@@ -28,30 +28,6 @@ jobs:
       - name: Show repo tree
         run: dir -Recurse
 
-      - name: Ensure fix_indentation.py exists
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "fix_indentation.py")) {
-            @"
-import os
-import autopep8
-
-def fix_file(path):
-    with open(path, 'r', encoding='utf-8') as f:
-        code = f.read()
-    fixed = autopep8.fix_code(code, options={'aggressive': 2})
-    if code != fixed:
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(fixed)
-        print(f"✅ Fixed indentation in {path}")
-
-for root, _, files in os.walk('.'):
-    for file in files:
-        if file.endswith('.py'):
-            fix_file(os.path.join(root, file))
-"@ | Out-File -FilePath fix_indentation.py -Encoding utf8
-          }
-
       - name: Auto-fix Python indentation
         shell: pwsh
         run: |
