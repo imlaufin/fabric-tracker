@@ -1,33 +1,29 @@
 import os
 
 TARGET_FOLDER = "fabric_tracker_tk"
-FIX_INDENTATION = True  # Set to False if you only want to check
+FILES_TO_FIX_FIRST = ["main.py", "ui_masters.py"]
+FIX_INDENTATION = True  # True = fix automatically, False = just report
 
-def check_and_fix_file(filepath):
+def fix_file(filepath):
     with open(filepath, "rb") as f:
         raw = f.read()
 
-    # Detect tabs
-    has_tabs = b"\t" in raw
-
-    # Convert to string for replacing
+    # Skip non-UTF8 files
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         print(f"⚠ Skipping non-UTF8 file: {filepath}")
         return
 
-    fixed_text = text
-    if FIX_INDENTATION and has_tabs:
-        fixed_text = text.replace("\t", "    ")
+    has_tabs = "\t" in text
+    fixed_text = text.replace("\t", "    ") if FIX_INDENTATION else text
 
-    # Check for inconsistent indentation (lines starting with spaces but not multiple of 4)
     bad_lines = []
     for i, line in enumerate(fixed_text.splitlines(), start=1):
-        if line.startswith(" ") and not line.lstrip().startswith("#"):  # ignore pure comments
-            leading_spaces = len(line) - len(line.lstrip())
-            if leading_spaces % 4 != 0:
-                bad_lines.append((i, leading_spaces, line))
+        if line.strip() and not line.lstrip().startswith("#"):
+            spaces = len(line) - len(line.lstrip())
+            if spaces % 4 != 0:
+                bad_lines.append((i, spaces, line))
 
     if has_tabs or bad_lines:
         print(f"\n--- {filepath} ---")
@@ -41,12 +37,23 @@ def check_and_fix_file(filepath):
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(fixed_text)
             print("✅ Fixed indentation.")
+    else:
+        print(f"✔ {filepath} is clean.")
 
 def main():
+    # Step 1: Fix specific files first
+    for fname in FILES_TO_FIX_FIRST:
+        path = os.path.join(TARGET_FOLDER, fname)
+        if os.path.exists(path):
+            fix_file(path)
+        else:
+            print(f"⚠ {fname} not found in {TARGET_FOLDER}")
+
+    # Step 2: Scan all .py files in TARGET_FOLDER
     for root, _, files in os.walk(TARGET_FOLDER):
         for file in files:
-            if file.endswith(".py"):
-                check_and_fix_file(os.path.join(root, file))
+            if file.endswith(".py") and file not in FILES_TO_FIX_FIRST:
+                fix_file(os.path.join(root, file))
 
 if __name__ == "__main__":
     main()
