@@ -26,7 +26,24 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --add-data "fabric_tracker.db;." --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.ui_customers --hidden-import fabric_tracker_tk.ui_suppliers --hidden-import fabric_tracker_tk.ui_fabrics --hidden-import fabric_tracker_tk.ui_purchases --hidden-import fabric_tracker_tk.ui_sales --hidden-import fabric_tracker_tk.ui_stock --hidden-import fabric_tracker_tk.ui_yarn_types --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --hidden-import fabric_tracker_tk.db --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
+          pyinstaller --clean --onefile \
+          --add-data "fabric_tracker_tk/db.py;fabric_tracker_tk" \
+          --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" \
+          --hidden-import fabric_tracker_tk.ui_masters \
+          --hidden-import fabric_tracker_tk.ui_dashboard \
+          --hidden-import fabric_tracker_tk.ui_entries \
+          --hidden-import fabric_tracker_tk.ui_fabricators \
+          --hidden-import fabric_tracker_tk.ui_customers \
+          --hidden-import fabric_tracker_tk.ui_suppliers \
+          --hidden-import fabric_tracker_tk.ui_fabrics \
+          --hidden-import fabric_tracker_tk.ui_purchases \
+          --hidden-import fabric_tracker_tk.ui_sales \
+          --hidden-import fabric_tracker_tk.ui_stock \
+          --hidden-import fabric_tracker_tk.ui_yarn_types \
+          --hidden-import fabric_tracker_tk.reports \
+          --hidden-import fabric_tracker_tk.backup_restore \
+          --log-level DEBUG \
+          fabric_tracker_tk/main.py --name fabric_tracker
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
