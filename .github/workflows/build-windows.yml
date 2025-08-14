@@ -32,9 +32,9 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "fix_indentation.py")) {
-            Write-Host "Creating fix_indentation.py..."
-            @'
-import os, autopep8
+            @"
+import os
+import autopep8
 
 def fix_file(path):
     with open(path, 'r', encoding='utf-8') as f:
@@ -49,7 +49,7 @@ for root, _, files in os.walk('.'):
     for file in files:
         if file.endswith('.py'):
             fix_file(os.path.join(root, file))
-'@ | Out-File -FilePath fix_indentation.py -Encoding utf8
+"@ | Out-File -FilePath fix_indentation.py -Encoding utf8
           }
 
       - name: Auto-fix Python indentation
