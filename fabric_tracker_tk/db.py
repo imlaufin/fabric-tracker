@@ -44,6 +44,11 @@ def get_connection():
     return conn
 
 # ----------------------------
+# Default Supplier Names
+# ----------------------------
+DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
+
+# ----------------------------
 # DB Initialization / Migrations
 # ----------------------------
 def init_db():
@@ -142,17 +147,19 @@ def init_db():
 
     conn.commit()
 
-   # Default suppliers / units
-for unit_name, unit_type in [
-    ("Shiv Fabrics", "knitting_unit"),
-    ("Oswal Finishing Mills", "dyeing_unit")
-]:
-    cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
-    if not cur.fetchone():
-        cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
+    # Default suppliers / units
+    for unit_name, unit_type in [
+        ("Shiv Fabrics", "knitting_unit"),
+        ("Oswal Finishing Mills", "dyeing_unit")
+    ]:
+        cur.execute("SELECT id FROM suppliers WHERE name=? AND type=?", (unit_name, unit_type))
+        if not cur.fetchone():
+            cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (unit_name, unit_type))
+
     conn.commit()
     conn.close()
     print("[DB] New DB created and initialized." if created else "[DB] DB init/migrations complete.")
+
 
 # ----------------------------
 # Date Helpers
