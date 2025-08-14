@@ -12,7 +12,16 @@ DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
-    return os.path.join(os.path.dirname(__file__), DB_PATH)
+    """
+    Returns the path to the database file.
+    Works both in dev (script) and PyInstaller exe.
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, DB_PATH)
 
 def backup_db():
     if not os.path.exists(BACKUP_DIR):
