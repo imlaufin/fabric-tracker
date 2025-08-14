@@ -1,8 +1,8 @@
-# ui_entries.py
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from datetime import datetime
 from fabric_tracker_tk import db
+
 # ---------------- Autocomplete Combobox ----------------
 class AutocompleteCombobox(ttk.Combobox):
     """
@@ -21,20 +21,25 @@ class AutocompleteCombobox(ttk.Combobox):
         self.bind("<<ComboboxSelected>>", self._on_select, add="+")
         self.bind("<FocusIn>", self._on_focusin, add="+")
         self.bind("<FocusOut>", self._on_focusout, add="+")
+
     def set_completion_list(self, values):
         self._all_values = list(values or [])
         self._casefold_values = [(v, v.casefold()) for v in self._all_values]
         self["values"] = self._all_values
+
     def _on_focusin(self, _e):
         self.after_idle(lambda: self.select_range(0, tk.END))
+
     def _on_focusout(self, _e):
         # If leaving field and text is empty, do nothing
         txt = self.get().strip()
         if not txt:
             return
         # Keep text as-is (do not force snap) so free entries are allowed
+
     def _on_select(self, _e):
         self["values"] = self._all_values
+
     def _on_keyrelease(self, e):
         if e.keysym in self._nav_keys:
             return
@@ -55,6 +60,7 @@ class AutocompleteCombobox(ttk.Combobox):
         if txt != self._last_typed:
             self.event_generate("<Down>")
         self._last_typed = txt
+
 class EntriesFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
         super().__init__(parent)
@@ -74,6 +80,7 @@ class EntriesFrame(ttk.Frame):
         self.refresh_lists()
         self.reload_entries()
         self.reload_dyeing_outputs()
+
     def build_ui(self):
         # Notebook for Purchases / Dyeing Outputs
         self.notebook = ttk.Notebook(self)
@@ -88,6 +95,7 @@ class EntriesFrame(ttk.Frame):
         self.notebook.add(self.tab_dyeing, text="Dyeing Outputs")
         self.build_dyeing_form(self.tab_dyeing)
         self.build_dyeing_table(self.tab_dyeing)
+
     # ---------------- Purchases ----------------
     def build_purchase_form(self, parent):
         frm = ttk.Frame(parent)
@@ -128,6 +136,7 @@ class EntriesFrame(ttk.Frame):
         ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3, sticky="w")
         # Ensure delivered-to snaps to best match on Enter
         self.delivered_cb.bind("<Return>", lambda e: self._snap_autocomplete(self.delivered_cb))
+
     def _snap_autocomplete(self, combo: AutocompleteCombobox):
         txt = combo.get().strip()
         if not txt:
@@ -138,6 +147,7 @@ class EntriesFrame(ttk.Frame):
             if v.lower().startswith(txt.lower()):
                 combo.set(v)
                 break
+
     def build_purchase_table(self, parent):
         cols = ("date","batch","lot","supplier","yarn","kg","rolls","price","delivered")
         headings = ["Date","Batch","Lot","Supplier","Yarn Type","Kg","Rolls","Price/unit","Delivered"]
@@ -158,6 +168,7 @@ class EntriesFrame(ttk.Frame):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
         self.tree.bind("<Double-1>", self.on_purchase_double_click)
+
     # ---------------- Dyeing Outputs ----------------
     def build_dyeing_form(self, parent):
         frm = ttk.Frame(parent)
@@ -184,6 +195,7 @@ class EntriesFrame(ttk.Frame):
         # Action buttons
         ttk.Button(frm, text="Save", command=self.save_dyeing).grid(row=3, column=0, pady=8, sticky="w")
         ttk.Button(frm, text="Clear", command=self.clear_dyeing_form).grid(row=3, column=1, sticky="w")
+
     def build_dyeing_table(self, parent):
         cols = ("lot_id","unit","date","kg","rolls","notes")
         headings = ["Lot","Dyeing Unit","Returned Date","Kg","Rolls","Notes"]
@@ -204,6 +216,7 @@ class EntriesFrame(ttk.Frame):
             self.dye_tree.heading(c, text=h)
             self.dye_tree.column(c, width=w)
         self.dye_tree.bind("<Double-1>", self.on_dyeing_double_click)
+
     # ---------------- Lists / Refresh ----------------
     def refresh_lists(self):
         # Suppliers, delivered_to, yarn types, dyeing units
@@ -222,6 +235,7 @@ class EntriesFrame(ttk.Frame):
             self.yarn_cb.set(self._last_purchase_defaults["yarn"])
         if self._last_purchase_defaults["delivered"]:
             self.delivered_cb.set(self._last_purchase_defaults["delivered"])
+
     # ---------------- Helpers: ensure masters exist ----------------
     def _ensure_supplier_exists(self, name, supplier_type=None):
         """Insert supplier into masters if missing."""
@@ -247,6 +261,7 @@ class EntriesFrame(ttk.Frame):
                     cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (name, "supplier"))
         conn.commit()
         conn.close()
+
     def _ensure_yarn_type_exists(self, name):
         """Insert yarn type into masters if missing."""
         name = (name or "").strip()
@@ -261,6 +276,7 @@ class EntriesFrame(ttk.Frame):
             cur.execute("INSERT INTO yarn_types (name) VALUES (?)", (name,))
         conn.commit()
         conn.close()
+
     # ---------------- Purchases Functions ----------------
     def reload_entries(self):
         for r in self.tree.get_children():
@@ -275,6 +291,7 @@ class EntriesFrame(ttk.Frame):
                 row["qty_kg"],row["qty_rolls"],row["price_per_unit"],row["delivered_to"]
             ))
         conn.close()
+
     def save_purchase(self):
         date = self.date_e.get().strip()
         batch = self.batch_e.get().strip()
@@ -283,71 +300,71 @@ class EntriesFrame(ttk.Frame):
         yarn = self.yarn_cb.get().strip()
         delivered = self.delivered_cb.get().strip()
 
-    try:
-        kg = float(self.kg_e.get().strip() or 0)
-        rolls = int(self.rolls_e.get().strip() or 0)
-        price = float(self.price_e.get().strip() or 0)
-    except ValueError:
-        messagebox.showerror("Invalid", "Qty or Price must be numeric")
-        return
-
-    # Call validation & snapping helper
-    self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
-
-
-def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
-    # Check required fields
-    if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
-        messagebox.showwarning("Missing", "Please fill required fields")
-        return
-
-    # Snap delivered-to to first matching master (autocomplete behavior)
-    self._snap_autocomplete(self.delivered_cb)
-    delivered = self.delivered_cb.get().strip()
-
-    # Auto-add Delivered To if new
-    if delivered and delivered not in list(self.delivered_cb["values"]):
-        self._ensure_supplier_exists(delivered, supplier_type="supplier")
-
-    # Auto-add Supplier if new
-    if supplier and supplier not in list(self.supplier_cb["values"]):
-        self._ensure_supplier_exists(supplier, supplier_type="supplier")
-
-    # Auto-add Yarn if new
-    if yarn and yarn not in list(self.yarn_cb["values"]):
-        self._ensure_yarn_type_exists(yarn)
-
-    # Record or edit purchase in database
-    try:
-        if self.selected_purchase_id:
-            db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
-        else:
-            db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
-    except ValueError as e:
-        messagebox.showerror("Invalid Date", str(e))
-        return
-
-    # Remember values for bulk entries (preserve on clear)
-    self._last_purchase_defaults.update({
-        "date": date,
-        "batch": batch,
-        "supplier": supplier,
-        "yarn": yarn,
-        "price": self.price_e.get().strip(),
-        "delivered": delivered,
-    })
-
-    # Update dropdown lists so the new masters are immediately available
-    self.refresh_lists()
-    self.reload_entries()
-    # Clear only fields that change per item (Lot/Qty), keep the rest
-    self.clear_purchase_form(keep_defaults=True)
-    self.selected_purchase_id = None
-    if self.controller and hasattr(self.controller, "fabricators_frame"):
         try:
-            self.controller.fabricators_frame.build_tabs()
-        except Exception:
-            pass
+            kg = float(self.kg_e.get().strip() or 0)
+            rolls = int(self.rolls_e.get().strip() or 0)
+            price = float(self.price_e.get().strip() or 0)
+        except ValueError:
+            messagebox.showerror("Invalid", "Qty or Price must be numeric")
+            return
+
+        # Call validation & snapping helper
+        self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
+
+    def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
+        # Check required fields
+        if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
+            messagebox.showwarning("Missing", "Please fill required fields")
+            return
+
+        # Snap delivered-to to first matching master (autocomplete behavior)
+        self._snap_autocomplete(self.delivered_cb)
+        delivered = self.delivered_cb.get().strip()
+
+        # Auto-add Delivered To if new
+        if delivered and delivered not in list(self.delivered_cb["values"]):
+            self._ensure_supplier_exists(delivered, supplier_type="supplier")
+
+        # Auto-add Supplier if new
+        if supplier and supplier not in list(self.supplier_cb["values"]):
+            self._ensure_supplier_exists(supplier, supplier_type="supplier")
+
+        # Auto-add Yarn if new
+        if yarn and yarn not in list(self.yarn_cb["values"]):
+            self._ensure_yarn_type_exists(yarn)
+
+        # Record or edit purchase in database
+        try:
+            if self.selected_purchase_id:
+                db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+            else:
+                db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+        except ValueError as e:
+            messagebox.showerror("Invalid Date", str(e))
+            return
+
+        # Remember values for bulk entries (preserve on clear)
+        self._last_purchase_defaults.update({
+            "date": date,
+            "batch": batch,
+            "supplier": supplier,
+            "yarn": yarn,
+            "price": self.price_e.get().strip(),
+            "delivered": delivered,
+        })
+
+        # Update dropdown lists so the new masters are immediately available
+        self.refresh_lists()
+        self.reload_entries()
+        # Clear only fields that change per item (Lot/Qty), keep the rest
+        self.clear_purchase_form(keep_defaults=True)
+        self.selected_purchase_id = None
+        if self.controller and hasattr(self.controller, "fabricators_frame"):
+            try:
+                self.controller.fabricators_frame.build_tabs()
+            except Exception:
+                pass
+
     def clear_purchase_form(self, keep_defaults=True):
         """If keep_defaults=True, preserve date/batch/supplier/yarn/price/delivered."""
         # Always clear lot/qty fields for bulk entry speed
@@ -384,6 +401,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
                 "delivered": "",
             }
         self.selected_purchase_id = None
+
     def create_lot_dialog(self):
         batch_ref = self.batch_e.get().strip()
         if not batch_ref:
@@ -418,6 +436,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
             db.create_lot(b_id, maxidx+i)
         conn.close()
         messagebox.showinfo("Done", f"{lots} lots created.")
+
     def on_purchase_double_click(self, event):
         item = self.tree.selection()
         if not item:
@@ -455,6 +474,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
             "price": self.price_e.get(),
             "delivered": self.delivered_cb.get(),
         })
+
     # ---------------- Dyeing Outputs Functions ----------------
     def reload_dyeing_outputs(self):
         for r in self.dye_tree.get_children():
@@ -473,6 +493,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
                 row["lot_id"], row["unit"], display_date, row["returned_qty_kg"], row["returned_qty_rolls"], row["notes"]
             ))
         conn.close()
+
     def save_dyeing(self):
         lot_id = self.dyeing_lot_e.get().strip()
         unit = self.dyeing_unit_cb.get().strip()
@@ -515,6 +536,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
         self.clear_dyeing_form()
         self.selected_dyeing_id = None
         self.reload_dyeing_outputs()
+
     def clear_dyeing_form(self):
         self.dyeing_lot_e.delete(0, tk.END)
         self.dyeing_unit_cb.set("")
@@ -524,6 +546,7 @@ def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, l
         self.returned_rolls_e.delete(0, tk.END)
         self.returned_notes_e.delete(0, tk.END)
         self.selected_dyeing_id = None
+
     def on_dyeing_double_click(self, event):
         item = self.dye_tree.selection()
         if not item:
