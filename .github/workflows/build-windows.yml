@@ -43,6 +43,20 @@ jobs:
           if (-not (Test-Path "fabric_tracker_tk/main.py")) { Write-Error "Missing fabric_tracker_tk/main.py"; exit 1 }
           python -c "import sys; sys.path.insert(0, '.'); import fabric_tracker_tk; print('Imported fabric_tracker_tk from:', fabric_tracker_tk.__file__)"
 
+      - name: Fix Python indentation automatically
+        run: |
+          python fix_indentation.py || true
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No indentation fixes needed."
+          else
+            git commit -m "Auto-fix indentation issues"
+            git push
+            echo "Indentation fixed and pushed."
+          fi
+          
       - name: Build executable with debug logs
         run: pyinstaller --clean --onefile --add-data "fabric_tracker_tk/*.py;fabric_tracker_tk" --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
         shell: pwsh
