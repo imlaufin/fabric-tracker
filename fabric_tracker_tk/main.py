@@ -13,12 +13,12 @@ class FabricTrackerApp(tk.Tk):
         super().__init__()
         self.title("Fabric Tracker (All-in-One)")
         self.geometry("1200x800")
-        db.init_db()
+        db.init_db()  # Initialize database with persistent path
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        # create frames
+        # Create frames
         self.dashboard_frame = DashboardFrame(self.notebook, self)
         self.entries_frame = EntriesFrame(self.notebook, self)
         self.fabricators_frame = FabricatorsFrame(self.notebook, controller=self)
@@ -26,7 +26,7 @@ class FabricTrackerApp(tk.Tk):
         self.reports_frame = ReportsFrame(self.notebook, self)
         self.backup_frame = BackupRestoreFrame(self.notebook, controller=self)  # create backup/restore tab
 
-        # add to notebook
+        # Add to notebook
         self.notebook.add(self.entries_frame, text="Entries")
         self.notebook.add(self.dashboard_frame, text="Dashboard")
         self.notebook.add(self.fabricators_frame, text="Fabricators")
@@ -35,14 +35,14 @@ class FabricTrackerApp(tk.Tk):
         self.notebook.add(self.backup_frame, text="Backup & Restore")  # add the new tab
 
     def reload_fabricators(self):
-        # called when Masters change
+        # Called when Masters change
         try:
             self.fabricators_frame.build_tabs()
         except Exception as e:
             print("Error reloading fabricators:", e)
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
-        # proxy to fabricators frame
+        # Proxy to fabricators frame
         if hasattr(self.fabricators_frame, "open_dyeing_tab_for_batch"):
             self.fabricators_frame.open_dyeing_tab_for_batch(dyeer_name, batch_ref)
 
