@@ -38,7 +38,7 @@ def fix_file(filepath):
                 f.write(fixed_text)
             print("✅ Fixed indentation.")
     else:
-        print(f"✔ {filepath} is clean.")
+        print(f"[OK] {filepath} is clean.")
 
 def main():
     # Step 1: Fix specific files first
