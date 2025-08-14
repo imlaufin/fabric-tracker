@@ -29,18 +29,6 @@ jobs:
           pyinstaller --onefile \
             --add-data "fabric_tracker.db;." \
             fabric_tracker_tk/main.py --name fabric_tracker
-            --add-data "fabric_tracker_tk/ui_dashboard.py;." \
-            --add-data "fabric_tracker_tk/ui_entries.py;." \
-            --add-data "fabric_tracker_tk/ui_masters.py;." \
-            --add-data "fabric_tracker_tk/ui_fabricators.py;." \
-            --add-data "fabric_tracker_tk/ui_customers.py;." \
-            --add-data "fabric_tracker_tk/ui_fabrics.py;." \
-            --add-data "fabric_tracker_tk/ui_purchases.py;." \
-            --add-data "fabric_tracker_tk/ui_sales.py;." \
-            --add-data "fabric_tracker_tk/ui_stock.py;." \
-            --add-data "fabric_tracker_tk/ui_suppliers.py;." \
-            --add-data "fabric_tracker_tk/ui_yarn_types.py;." \
-            fabric_tracker_tk/main.py --name fabric_tracker
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
