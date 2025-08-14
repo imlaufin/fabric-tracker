@@ -20,6 +20,7 @@ class MastersFrame(ttk.Frame):
         # Set theme to support background colors
         style = ttk.Style()
         style.theme_use("clam")
+        print(f"[DEBUG] Tkinter theme set to: {style.theme_use()}")
         self.build_ui()
         self.load_masters()
 
@@ -48,6 +49,9 @@ class MastersFrame(ttk.Frame):
         self.tree.heading("name", text="Name")
         self.tree.heading("type", text="Type")
         self.tree.heading("color", text="Color")
+        self.tree.column("name", width=200)
+        self.tree.column("type", width=150)
+        self.tree.column("color", width=100)  # Ensure color column is visible
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Right-click context menu
@@ -71,12 +75,12 @@ class MastersFrame(ttk.Frame):
     def choose_color(self):
         color = colorchooser.askcolor(title="Choose color")
         if color and color[1]:
-            self.chosen_color = color[1]
-            self.color_btn.configure(text=self.chosen_color)
+            self.chosen_color = color[1]  # e.g., "#800040"
             style_name = "Custom.TButton"
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color)
-            self.color_btn.configure(style=style_name)
+            s.configure(style_name, background=self.chosen_color, foreground="white")
+            print(f"[DEBUG] Configuring style {style_name} with background={self.chosen_color}")
+            self.color_btn.configure(text=self.chosen_color, style=style_name)
 
     def add_or_update(self):
         name = self.name_entry.get().strip()
@@ -90,6 +94,7 @@ class MastersFrame(ttk.Frame):
         color_hex = getattr(self, "chosen_color", "")
 
         if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
+            print(f"[DEBUG] Adding/Updating master: name={name}, type={mtype}, color={color_hex}")
             db.add_master(name, mtype, color_hex)
             db.update_master_color_and_type(name, mtype, color_hex)
         elif mtype == "yarn_type":
@@ -125,6 +130,7 @@ class MastersFrame(ttk.Frame):
             elif mtype == "fabric_type":
                 rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_fabric_types()]
 
+            print(f"[DEBUG] Loading masters for type={mtype}, rows={rows}")
             for row in rows:
                 try:
                     name = row["name"]
@@ -132,23 +138,23 @@ class MastersFrame(ttk.Frame):
                     color = row["color_code"] if "color_code" in row.keys() else ""
                     type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
 
+                    print(f"[DEBUG] Inserting row: name={name}, type={type_label}, color={color}")
                     if color:
-                        # Create a small color rectangle for display
                         img = tk.PhotoImage(width=16, height=16)
                         img.put(color, to=(0, 0, 16, 16))
-                        self.color_imgs[name] = img  # keep a reference
-                        self.tree.insert("", "end", iid=name, values=(name, type_label, color), image=img)
+                        self.color_imgs[name] = img
+                        self.tree.insert("", "end", values=(name, type_label, color), image=img)
                     else:
-                        self.tree.insert("", "end", iid=name, values=(name, type_label, ""))
-                except KeyError:
+                        self.tree.insert("", "end", values=(name, type_label, ""))
+                except KeyError as e:
+                    print(f"[DEBUG] KeyError in load_masters: {e}, row={row}")
                     continue
 
     def delete_selected(self):
         sel = self.tree.selection()
         if not sel:
             return
-        name = sel[0]  # Use iid as name
-        typelabel, color = self.tree.item(sel[0])["values"][1:]
+        name, typelabel, _ = self.tree.item(sel[0])["values"]
         if messagebox.askyesno("Confirm", f"Delete {name}?"):
             success = db.delete_master_by_name(name)
             if not success:
@@ -160,8 +166,7 @@ class MastersFrame(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        name = sel[0]  # Use iid as name
-        typelabel, color = self.tree.item(sel[0])["values"][1:]
+        name, typelabel, color = self.tree.item(sel[0])["values"]
 
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
@@ -174,14 +179,12 @@ class MastersFrame(ttk.Frame):
 
         if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
             self.chosen_color = color or ""
-            self.color_btn.configure(text=color or "Choose")
-            if color:
-                style_name = "Custom.TButton"
+            style_name = "Custom.TButton" if self.chosen_color else "TButton"
+            if self.chosen_color:
                 s = ttk.Style()
-                s.configure(style_name, background=color)
-                self.color_btn.configure(style=style_name)
-            else:
-                self.color_btn.configure(style="TButton")
+                s.configure(style_name, background=self.chosen_color, foreground="white")
+                print(f"[DEBUG] Configuring style {style_name} with background={self.chosen_color} in edit_selected")
+            self.color_btn.configure(text=color or "Choose", style=style_name)
         else:
             self.chosen_color = ""
             self.color_btn.configure(text="Choose", style="TButton")
