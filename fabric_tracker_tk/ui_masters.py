@@ -73,9 +73,9 @@ class MastersFrame(ttk.Frame):
         color = colorchooser.askcolor(title="Choose color")
         if color and color[1]:
             self.chosen_color = color[1]  # e.g., "#800040"
-            style_name = f"Color.TButton.{self.chosen_color.replace('#', '')}"  # e.g., "Color.TButton.800040"
+            style_name = "Custom.TButton"  # Use a fixed style name
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color, foreground="white")  # Use white text for contrast
+            s.configure(style_name, background=self.chosen_color, foreground="white")  # Define style
             self.color_btn.configure(text=self.chosen_color, style=style_name)
 
     def add_or_update(self):
@@ -172,7 +172,7 @@ class MastersFrame(ttk.Frame):
 
         if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
             self.chosen_color = color or ""
-            style_name = f"Color.TButton.{self.chosen_color.replace('#', '')}" if self.chosen_color else "TButton"
+            style_name = "Custom.TButton" if self.chosen_color else "TButton"
             if self.chosen_color:
                 s = ttk.Style()
                 s.configure(style_name, background=self.chosen_color, foreground="white")
