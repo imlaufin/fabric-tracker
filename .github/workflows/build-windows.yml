@@ -28,6 +28,7 @@ jobs:
         run: |
           pyinstaller --onefile \
             --add-data "fabric_tracker.db;." \
+            fabric_tracker_tk/main.py --name fabric_tracker
             --add-data "fabric_tracker_tk/ui_dashboard.py;." \
             --add-data "fabric_tracker_tk/ui_entries.py;." \
             --add-data "fabric_tracker_tk/ui_masters.py;." \
