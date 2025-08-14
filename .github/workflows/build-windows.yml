@@ -26,7 +26,10 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile fabric_tracker_tk/main.py --name fabric_tracker
+          # include all .py files in the main.py folder
+          pyinstaller --onefile fabric_tracker_tk/main.py \
+                      --name fabric_tracker \
+                      --add-data "fabric_tracker_tk/*.py;." 
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
