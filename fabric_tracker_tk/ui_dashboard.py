@@ -1,7 +1,7 @@
 # ui_dashboard.py
 import tkinter as tk
 from tkinter import ttk
-import db
+from fabric_tracker_tk import db
 from datetime import datetime
 
 class DashboardFrame(ttk.Frame):
