@@ -1,7 +1,7 @@
 # ui_fabricators.py
 import tkinter as tk
 from tkinter import ttk, messagebox
-import db
+from fabric_tracker_tk import db
 from datetime import datetime
 
 SHORTAGE_THRESHOLD_PERCENT = 5.0  # highlight threshold
