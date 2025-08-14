@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 from datetime import datetime
-import db
+from fabric_tracker_tk import db
 
 # ---------------- Autocomplete Combobox ----------------
 class AutocompleteCombobox(ttk.Combobox):
