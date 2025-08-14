@@ -26,20 +26,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable with debug logs
-        run: |
-          pyinstaller --clean --onefile \
-          --collect-submodules fabric_tracker_tk \
-          --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" \
-          --hidden-import fabric_tracker_tk.ui_masters \
-          --hidden-import fabric_tracker_tk.ui_dashboard \
-          --hidden-import fabric_tracker_tk.ui_entries \
-          --hidden-import fabric_tracker_tk.ui_fabricators \
-          --hidden-import fabric_tracker_tk.reports \
-          --hidden-import fabric_tracker_tk.backup_restore \
-          --log-level DEBUG \
-          --debug all \
-          fabric_tracker_tk/main.py \
-          --name fabric_tracker
+        run: pyinstaller --clean --onefile --collect-submodules fabric_tracker_tk --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
