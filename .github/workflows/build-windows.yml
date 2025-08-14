@@ -25,8 +25,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Verify package presence
+        run: |
+          if (-not (Test-Path "fabric_tracker_tk/__init__.py")) { Write-Error "❌ Missing fabric_tracker_tk/__init__.py"; exit 1 }
+          python -c "import sys; sys.path.insert(0, '.'); import fabric_tracker_tk; print('✅ Imported fabric_tracker_tk from:', fabric_tracker_tk.__file__)"
+
       - name: Build executable with debug logs
-        run: pyinstaller --clean --onefile --collect-submodules fabric_tracker_tk --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
+        run: pyinstaller --clean --onefile --add-data "fabric_tracker_tk/*.py;fabric_tracker_tk" --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
+        shell: pwsh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
