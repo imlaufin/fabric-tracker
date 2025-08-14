@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-import db
+from fabric_tracker_tk import db
 from ui_dashboard import DashboardFrame
 from ui_entries import EntriesFrame
 from ui_masters import MastersFrame
