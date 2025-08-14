@@ -105,39 +105,40 @@ class MastersFrame(ttk.Frame):
         self.load_masters()
         self.reload_cb_and_notify()
 
-    def load_masters(self):
-        for r in self.tree.get_children():
-            self.tree.delete(r)
+  def load_masters(self):
+    for r in self.tree.get_children():
+        self.tree.delete(r)
 
-        self.color_imgs.clear()
+    self.color_imgs.clear()
 
-        for t in MASTER_TYPES:
-            mtype = t[1]
-            rows = []
+    for t in MASTER_TYPES:
+        mtype = t[1]
+        rows = []
 
-            if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
-                rows = db.list_suppliers(mtype)
-            elif mtype == "yarn_type":
-                rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_yarn_types()]
-            elif mtype == "fabric_type":
-                rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_fabric_types()]
+        if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
+            rows = db.list_suppliers(mtype)
+        elif mtype == "yarn_type":
+            rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_yarn_types()]
+        elif mtype == "fabric_type":
+            rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_fabric_types()]
 
-            for row in rows:
-                try:
-                    name = row["name"]
-                    typ = row["type"] if "type" in row.keys() else mtype
-                    color = row["color_code"] if "color_code" in row.keys() else ""
-                    type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
+        for row in rows:
+            try:
+                name = row["name"]
+                typ = row["type"] if "type" in row.keys() else mtype
+                color = row["color_code"] if "color_code" in row.keys() else ""
+                type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
 
+                if color:
                     # Create a small color rectangle for display
-                    img = None
-                    if color:
-                        img = tk.PhotoImage(width=16, height=16)
-                        img.put(color, to=(0,0,16,16))
-                        self.color_imgs[name] = img  # keep a reference
+                    img = tk.PhotoImage(width=16, height=16)
+                    img.put(color, to=(0,0,16,16))
+                    self.color_imgs[name] = img  # keep a reference
                     self.tree.insert("", "end", values=(name, type_label, ""), image=img)
-                except KeyError:
-                    continue
+                else:
+                    self.tree.insert("", "end", values=(name, type_label, ""))
+            except KeyError:
+                continue
 
     def delete_selected(self):
         sel = self.tree.selection()
