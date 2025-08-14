@@ -1,7 +1,7 @@
 # ui_purchases.py
 import tkinter as tk
 from tkinter import ttk, messagebox
-from db import Database
+from fabric_tracker_tk.db import Database
 
 class PurchasesUI:
     def __init__(self, master):
