@@ -23,27 +23,35 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller autopep8
 
       - name: Show repo tree
         run: dir -Recurse
 
-      - name: Fix and check indentation
+      - name: Ensure fix_indentation.py exists
         run: |
-          python fix_indentation.py
-          if (Select-String "✅ Fixed indentation" -Path fix_indentation.py) {
-            Write-Error "Indentation issues found and fixed. Please commit the fixes to your repo."
-            exit 1
+          if (-not (Test-Path "fix_indentation.py")) {
+            echo "Creating fix_indentation.py..."
+            @"
+import os, autopep8
+
+def fix_file(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        code = f.read()
+    fixed = autopep8.fix_code(code, options={'aggressive': 2})
+    if code != fixed:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(fixed)
+        print(f"Fixed indentation in {path}")
+
+for root, _, files in os.walk('.'):
+    for file in files:
+        if file.endswith('.py'):
+            fix_file(os.path.join(root, file))
+"@ > fix_indentation.py
           }
-        shell: pwsh
 
-      - name: Verify package and entry script
-        run: |
-          if (-not (Test-Path "fabric_tracker_tk/__init__.py")) { Write-Error "Missing fabric_tracker_tk/__init__.py"; exit 1 }
-          if (-not (Test-Path "fabric_tracker_tk/main.py")) { Write-Error "Missing fabric_tracker_tk/main.py"; exit 1 }
-          python -c "import sys; sys.path.insert(0, '.'); import fabric_tracker_tk; print('Imported fabric_tracker_tk from:', fabric_tracker_tk.__file__)"
-
-      - name: Fix Python indentation automatically
+      - name: Auto-fix Python indentation and commit if needed
         run: |
           python fix_indentation.py || true
           git config --global user.name "GitHub Actions"
@@ -56,7 +64,13 @@ jobs:
             git push
             echo "Indentation fixed and pushed."
           fi
-          
+
+      - name: Verify package and entry script
+        run: |
+          if (-not (Test-Path "fabric_tracker_tk/__init__.py")) { Write-Error "Missing fabric_tracker_tk/__init__.py"; exit 1 }
+          if (-not (Test-Path "fabric_tracker_tk/main.py")) { Write-Error "Missing fabric_tracker_tk/main.py"; exit 1 }
+          python -c "import sys; sys.path.insert(0, '.'); import fabric_tracker_tk; print('Imported fabric_tracker_tk from:', fabric_tracker_tk.__file__)"
+
       - name: Build executable with debug logs
         run: pyinstaller --clean --onefile --add-data "fabric_tracker_tk/*.py;fabric_tracker_tk" --add-data "fabric_tracker_tk/fabric_tracker.db;fabric_tracker_tk" --hidden-import fabric_tracker_tk.ui_masters --hidden-import fabric_tracker_tk.ui_dashboard --hidden-import fabric_tracker_tk.ui_entries --hidden-import fabric_tracker_tk.ui_fabricators --hidden-import fabric_tracker_tk.reports --hidden-import fabric_tracker_tk.backup_restore --log-level DEBUG fabric_tracker_tk/main.py --name fabric_tracker
         shell: pwsh
