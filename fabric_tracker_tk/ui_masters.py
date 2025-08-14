@@ -48,7 +48,6 @@ class MastersFrame(ttk.Frame):
         self.tree.heading("name", text="Name")
         self.tree.heading("type", text="Type")
         self.tree.heading("color", text="Color")
-        self.tree.column("color", width=100)  # Ensure color column is wide enough
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Right-click context menu
@@ -72,11 +71,12 @@ class MastersFrame(ttk.Frame):
     def choose_color(self):
         color = colorchooser.askcolor(title="Choose color")
         if color and color[1]:
-            self.chosen_color = color[1]  # e.g., "#800040"
-            style_name = "Custom.TButton"  # Use a fixed style name
+            self.chosen_color = color[1]
+            self.color_btn.configure(text=self.chosen_color)
+            style_name = "Custom.TButton"
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color, foreground="white")  # Define style
-            self.color_btn.configure(text=self.chosen_color, style=style_name)
+            s.configure(style_name, background=self.chosen_color)
+            self.color_btn.configure(style=style_name)
 
     def add_or_update(self):
         name = self.name_entry.get().strip()
@@ -137,9 +137,9 @@ class MastersFrame(ttk.Frame):
                         img = tk.PhotoImage(width=16, height=16)
                         img.put(color, to=(0, 0, 16, 16))
                         self.color_imgs[name] = img  # keep a reference
-                        self.tree.insert("", "end", values=(name, type_label, color), image=img)
+                        self.tree.insert("", "end", iid=name, values=(name, type_label, color), image=img)
                     else:
-                        self.tree.insert("", "end", values=(name, type_label, ""))
+                        self.tree.insert("", "end", iid=name, values=(name, type_label, ""))
                 except KeyError:
                     continue
 
@@ -147,7 +147,8 @@ class MastersFrame(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        name, typelabel, _ = self.tree.item(sel[0])["values"]
+        name = sel[0]  # Use iid as name
+        typelabel, color = self.tree.item(sel[0])["values"][1:]
         if messagebox.askyesno("Confirm", f"Delete {name}?"):
             success = db.delete_master_by_name(name)
             if not success:
@@ -159,7 +160,8 @@ class MastersFrame(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        name, typelabel, color = self.tree.item(sel[0])["values"]
+        name = sel[0]  # Use iid as name
+        typelabel, color = self.tree.item(sel[0])["values"][1:]
 
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
@@ -172,11 +174,14 @@ class MastersFrame(ttk.Frame):
 
         if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
             self.chosen_color = color or ""
-            style_name = "Custom.TButton" if self.chosen_color else "TButton"
-            if self.chosen_color:
+            self.color_btn.configure(text=color or "Choose")
+            if color:
+                style_name = "Custom.TButton"
                 s = ttk.Style()
-                s.configure(style_name, background=self.chosen_color, foreground="white")
-            self.color_btn.configure(text=color or "Choose", style=style_name)
+                s.configure(style_name, background=color)
+                self.color_btn.configure(style=style_name)
+            else:
+                self.color_btn.configure(style="TButton")
         else:
             self.chosen_color = ""
             self.color_btn.configure(text="Choose", style="TButton")
