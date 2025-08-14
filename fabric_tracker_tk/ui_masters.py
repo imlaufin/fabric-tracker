@@ -52,7 +52,7 @@ class MastersFrame(ttk.Frame):
         ttk.Button(btns, text="Edit Selected", command=self.edit_selected).pack(side="left", padx=8)
 
     def choose_color(self):
-        color = colorchooser.askcolor(title="Choose supplier color")
+        color = colorchooser.askcolor(title="Choose color")
         if color and color[1]:
             self.chosen_color = color[1]
             self.color_btn.configure(text=self.chosen_color)
@@ -72,16 +72,18 @@ class MastersFrame(ttk.Frame):
         mtype = type_map.get(type_label, "yarn_supplier")
         color_hex = getattr(self, "chosen_color", "")
 
+        # Add / Update logic
         if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
             db.add_master(name, mtype, color_hex)
             db.update_master_color_and_type(name, mtype, color_hex)
         elif mtype == "yarn_type":
             db.add_yarn_type(name)
         elif mtype == "fabric_type":
-            db.add_master(name, mtype, "")
+            db.add_fabric_type(name)
 
         messagebox.showinfo("Saved", f"{name} saved/updated.")
 
+        # Reset inputs
         self.name_entry.delete(0, tk.END)
         self.type_cb.current(0)
         self.chosen_color = ""
@@ -96,40 +98,34 @@ class MastersFrame(ttk.Frame):
 
         for t in MASTER_TYPES:
             mtype = t[1]
+            rows = []
 
-            if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit", "fabric_type"):
-                rows = db.list_suppliers(mtype if mtype != "fabric_type" else None)
-                for row in rows:
-                    try:
-                        name = row["name"]
-                        typ = row["type"] if "type" in row.keys() else mtype
-                        color = row["color_code"] if "color_code" in row.keys() else ""
-                        type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
-                        self.tree.insert("", "end", values=(name, type_label, color))
-                    except KeyError:
-                        continue  # skip invalid rows
-
+            if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
+                rows = db.list_suppliers(mtype)
             elif mtype == "yarn_type":
-                rows = db.list_yarn_types()
-                for yname in rows:
-                    if not yname:
-                        continue
-                    self.tree.insert("", "end", values=(yname, t[0], ""))
+                rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_yarn_types()]
+            elif mtype == "fabric_type":
+                rows = [{"name": n, "type": mtype, "color_code": ""} for n in db.list_fabric_types()]
+
+            for row in rows:
+                try:
+                    name = row["name"]
+                    typ = row.get("type", mtype)
+                    color = row.get("color_code", "")
+                    type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
+                    self.tree.insert("", "end", values=(name, type_label, color))
+                except KeyError:
+                    continue
 
     def delete_selected(self):
         sel = self.tree.selection()
         if not sel:
             return
         name, typelabel, _ = self.tree.item(sel[0])["values"]
-        type_map = {t[0]: t[1] for t in MASTER_TYPES}
-        mtype = type_map.get(typelabel, None)
-        if not mtype:
-            return
-
         if messagebox.askyesno("Confirm", f"Delete {name}?"):
             success = db.delete_master_by_name(name)
             if not success:
-                messagebox.showwarning("Cannot Delete", f"{name} cannot be deleted (maybe in use or default).")
+                messagebox.showwarning("Cannot Delete", f"{name} cannot be deleted (maybe in use).")
             self.load_masters()
             self.reload_cb_and_notify()
 
@@ -137,8 +133,7 @@ class MastersFrame(ttk.Frame):
         sel = self.tree.selection()
         if not sel:
             return
-        vals = self.tree.item(sel[0])["values"]
-        name, typelabel, color = vals
+        name, typelabel, color = self.tree.item(sel[0])["values"]
 
         self.name_entry.delete(0, tk.END)
         self.name_entry.insert(0, name)
