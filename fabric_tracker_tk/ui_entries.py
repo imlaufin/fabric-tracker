@@ -352,6 +352,7 @@ class EntriesFrame(ttk.Frame):
         messagebox.showerror("Invalid", "Qty or Price must be numeric")
         return
 
+    def some_method(self):
     if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
         messagebox.showwarning("Missing", "Please fill required fields")
         return
