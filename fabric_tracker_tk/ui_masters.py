@@ -72,7 +72,6 @@ class MastersFrame(ttk.Frame):
         mtype = type_map.get(type_label, "yarn_supplier")
         color_hex = getattr(self, "chosen_color", "")
 
-        # Add / Update logic
         if mtype in ("yarn_supplier", "knitting_unit", "dyeing_unit"):
             db.add_master(name, mtype, color_hex)
             db.update_master_color_and_type(name, mtype, color_hex)
@@ -110,8 +109,8 @@ class MastersFrame(ttk.Frame):
             for row in rows:
                 try:
                     name = row["name"]
-                    typ = row.get("type", mtype)
-                    color = row.get("color_code", "")
+                    typ = row["type"] if "type" in row.keys() else mtype
+                    color = row["color_code"] if "color_code" in row.keys() else ""
                     type_label = next((x[0] for x in MASTER_TYPES if x[1] == typ), typ)
                     self.tree.insert("", "end", values=(name, type_label, color))
                 except KeyError:
