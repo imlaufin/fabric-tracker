@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import shutil
 from datetime import datetime
-import db
+from fabric_tracker_tk import db
 
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # Keep only last 5 backups
