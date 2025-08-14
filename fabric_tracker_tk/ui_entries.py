@@ -282,6 +282,7 @@ class EntriesFrame(ttk.Frame):
         supplier = self.supplier_cb.get().strip()
         yarn = self.yarn_cb.get().strip()
         delivered = self.delivered_cb.get().strip()
+
     try:
         kg = float(self.kg_e.get().strip() or 0)
         rolls = int(self.rolls_e.get().strip() or 0)
@@ -289,23 +290,34 @@ class EntriesFrame(ttk.Frame):
     except ValueError:
         messagebox.showerror("Invalid", "Qty or Price must be numeric")
         return
-    def validate_and_snap(self, date, yarn, kg, rolls, delivered):
-        # Check required fields
-        if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
-            messagebox.showwarning("Missing", "Please fill required fields")
-            return
-        # Snap delivered-to to first matching master (autocomplete behavior)
-        self._snap_autocomplete(self.delivered_cb)
-        delivered = self.delivered_cb.get().strip()
-        # Auto-add Delivered To if new
-        if delivered and delivered not in list(self.delivered_cb["values"]):
+
+    # Call validation & snapping helper
+    self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
+
+
+def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
+    # Check required fields
+    if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
+        messagebox.showwarning("Missing", "Please fill required fields")
+        return
+
+    # Snap delivered-to to first matching master (autocomplete behavior)
+    self._snap_autocomplete(self.delivered_cb)
+    delivered = self.delivered_cb.get().strip()
+
+    # Auto-add Delivered To if new
+    if delivered and delivered not in list(self.delivered_cb["values"]):
         self._ensure_supplier_exists(delivered, supplier_type="supplier")
-        # Auto-add Supplier if new
-        if supplier and supplier not in list(self.supplier_cb["values"]):
+
+    # Auto-add Supplier if new
+    if supplier and supplier not in list(self.supplier_cb["values"]):
         self._ensure_supplier_exists(supplier, supplier_type="supplier")
-        # Auto-add Yarn if new
-        if yarn and yarn not in list(self.yarn_cb["values"]):
+
+    # Auto-add Yarn if new
+    if yarn and yarn not in list(self.yarn_cb["values"]):
         self._ensure_yarn_type_exists(yarn)
+
+    # Record or edit purchase in database
     try:
         if self.selected_purchase_id:
             db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
@@ -314,6 +326,7 @@ class EntriesFrame(ttk.Frame):
     except ValueError as e:
         messagebox.showerror("Invalid Date", str(e))
         return
+
     # Remember values for bulk entries (preserve on clear)
     self._last_purchase_defaults.update({
         "date": date,
@@ -323,6 +336,7 @@ class EntriesFrame(ttk.Frame):
         "price": self.price_e.get().strip(),
         "delivered": delivered,
     })
+
     # Update dropdown lists so the new masters are immediately available
     self.refresh_lists()
     self.reload_entries()
