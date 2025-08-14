@@ -29,10 +29,11 @@ jobs:
         run: dir -Recurse
 
       - name: Ensure fix_indentation.py exists
+        shell: pwsh
         run: |
           if (-not (Test-Path "fix_indentation.py")) {
-            echo "Creating fix_indentation.py..."
-            @"
+            Write-Host "Creating fix_indentation.py..."
+            @'
 import os, autopep8
 
 def fix_file(path):
@@ -42,28 +43,29 @@ def fix_file(path):
     if code != fixed:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(fixed)
-        print(f"Fixed indentation in {path}")
+        print(f"✅ Fixed indentation in {path}")
 
 for root, _, files in os.walk('.'):
     for file in files:
         if file.endswith('.py'):
             fix_file(os.path.join(root, file))
-"@ > fix_indentation.py
+'@ | Out-File -FilePath fix_indentation.py -Encoding utf8
           }
 
-      - name: Auto-fix Python indentation and commit if needed
+      - name: Auto-fix Python indentation
+        shell: pwsh
         run: |
-          python fix_indentation.py || true
+          python fix_indentation.py
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add .
-          if git diff --cached --quiet; then
-            echo "No indentation fixes needed."
-          else
-            git commit -m "Auto-fix indentation issues"
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "Auto-fix Python indentation"
             git push
             echo "Indentation fixed and pushed."
-          fi
+          } else {
+            echo "No indentation fixes needed."
+          }
 
       - name: Verify package and entry script
         run: |
