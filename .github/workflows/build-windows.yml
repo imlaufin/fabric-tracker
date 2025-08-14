@@ -25,7 +25,7 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
+      - name: Build executable with debug logs
         run: |
           pyinstaller --clean --onefile \
           --collect-submodules fabric_tracker_tk \
@@ -37,6 +37,7 @@ jobs:
           --hidden-import fabric_tracker_tk.reports \
           --hidden-import fabric_tracker_tk.backup_restore \
           --log-level DEBUG \
+          --debug all \
           fabric_tracker_tk/main.py \
           --name fabric_tracker
 
@@ -45,3 +46,6 @@ jobs:
         with:
           name: fabric-tracker-windows
           path: dist/fabric_tracker.exe
+
+      - name: Show dist folder contents
+        run: dir dist
