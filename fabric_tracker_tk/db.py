@@ -44,11 +44,6 @@ def get_connection():
     return conn
 
 # ----------------------------
-# Default Supplier Names
-# ----------------------------
-DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
-
-# ----------------------------
 # DB Initialization / Migrations
 # ----------------------------
 def init_db():
