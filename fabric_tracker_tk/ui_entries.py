@@ -337,12 +337,12 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def save_purchase(self):
-    date = self.date_e.get().strip()
-    batch = self.batch_e.get().strip()
-    lot = self.lot_e.get().strip()
-    supplier = self.supplier_cb.get().strip()
-    yarn = self.yarn_cb.get().strip()
-    delivered = self.delivered_cb.get().strip()
+        date = self.date_e.get().strip()
+        batch = self.batch_e.get().strip()
+        lot = self.lot_e.get().strip()
+        supplier = self.supplier_cb.get().strip()
+        yarn = self.yarn_cb.get().strip()
+        delivered = self.delivered_cb.get().strip()
 
     try:
         kg = float(self.kg_e.get().strip() or 0)
