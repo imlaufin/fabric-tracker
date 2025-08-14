@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import db
+from fabric_tracker_tk import db
+
 
 class SuppliersScreen(ttk.Frame):
     def __init__(self, parent, controller):
