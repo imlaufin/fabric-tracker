@@ -1,12 +1,12 @@
 import tkinter as tk
 from tkinter import ttk
 from fabric_tracker_tk import db
-from ui_dashboard import DashboardFrame
-from ui_entries import EntriesFrame
-from ui_masters import MastersFrame
-from ui_fabricators import FabricatorsFrame
-from reports import ReportsFrame
-from backup_restore import BackupRestoreFrame  # import the backup/restore UI
+from fabric_tracker_tk.ui_dashboard import DashboardFrame
+from fabric_tracker_tk.ui_entries import EntriesFrame
+from fabric_tracker_tk.ui_masters import MastersFrame
+from fabric_tracker_tk.ui_fabricators import FabricatorsFrame
+from fabric_tracker_tk.reports import ReportsFrame
+from fabric_tracker_tk.backup_restore import BackupRestoreFrame  # import the backup/restore UI
 
 class FabricTrackerApp(tk.Tk):
     def __init__(self):
