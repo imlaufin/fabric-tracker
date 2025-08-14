@@ -28,6 +28,15 @@ jobs:
       - name: Show repo tree
         run: dir -Recurse
 
+      - name: Fix and check indentation
+        run: |
+          python fix_indentation.py
+          if (Select-String "✅ Fixed indentation" -Path fix_indentation.py) {
+            Write-Error "Indentation issues found and fixed. Please commit the fixes to your repo."
+            exit 1
+          }
+        shell: pwsh
+
       - name: Verify package and entry script
         run: |
           if (-not (Test-Path "fabric_tracker_tk/__init__.py")) { Write-Error "Missing fabric_tracker_tk/__init__.py"; exit 1 }
