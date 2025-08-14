@@ -17,6 +17,9 @@ class MastersFrame(ttk.Frame):
         self.on_change_callback = on_change_callback
         self.chosen_color = ""
         self.color_imgs = {}  # store small color rectangles for treeview
+        # Set theme to support background colors
+        style = ttk.Style()
+        style.theme_use("clam")
         self.build_ui()
         self.load_masters()
 
@@ -45,6 +48,7 @@ class MastersFrame(ttk.Frame):
         self.tree.heading("name", text="Name")
         self.tree.heading("type", text="Type")
         self.tree.heading("color", text="Color")
+        self.tree.column("color", width=100)  # Ensure color column is wide enough
         self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Right-click context menu
@@ -68,12 +72,11 @@ class MastersFrame(ttk.Frame):
     def choose_color(self):
         color = colorchooser.askcolor(title="Choose color")
         if color and color[1]:
-            self.chosen_color = color[1]
-            self.color_btn.configure(text=self.chosen_color)
-            style_name = f"Color.TButton.{self.chosen_color}"
+            self.chosen_color = color[1]  # e.g., "#800040"
+            style_name = f"Color.TButton.{self.chosen_color.replace('#', '')}"  # e.g., "Color.TButton.800040"
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color)
-            self.color_btn.configure(style=style_name)
+            s.configure(style_name, background=self.chosen_color, foreground="white")  # Use white text for contrast
+            self.color_btn.configure(text=self.chosen_color, style=style_name)
 
     def add_or_update(self):
         name = self.name_entry.get().strip()
@@ -134,7 +137,7 @@ class MastersFrame(ttk.Frame):
                         img = tk.PhotoImage(width=16, height=16)
                         img.put(color, to=(0, 0, 16, 16))
                         self.color_imgs[name] = img  # keep a reference
-                        self.tree.insert("", "end", values=(name, type_label, ""), image=img)
+                        self.tree.insert("", "end", values=(name, type_label, color), image=img)
                     else:
                         self.tree.insert("", "end", values=(name, type_label, ""))
                 except KeyError:
@@ -169,11 +172,11 @@ class MastersFrame(ttk.Frame):
 
         if typelabel in ("Yarn Supplier", "Knitting Unit", "Dyeing Unit"):
             self.chosen_color = color or ""
-            self.color_btn.configure(text=color or "Choose", style="TButton")
+            style_name = f"Color.TButton.{self.chosen_color.replace('#', '')}" if self.chosen_color else "TButton"
+            if self.chosen_color:
+                s = ttk.Style()
+                s.configure(style_name, background=self.chosen_color, foreground="white")
+            self.color_btn.configure(text=color or "Choose", style=style_name)
         else:
             self.chosen_color = ""
             self.color_btn.configure(text="Choose", style="TButton")
-
-    def reload_cb_and_notify(self):
-        if self.on_change_callback:
-            self.on_change_callback()
