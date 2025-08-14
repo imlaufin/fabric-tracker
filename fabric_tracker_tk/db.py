@@ -6,6 +6,7 @@ from datetime import datetime
 DB_PATH = "fabric.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
+DEFAULT_NAMES = ["Default Knitting Unit", "Default Dyeing Unit"]
 
 # ----------------------------
 # Backup / Restore Utilities
@@ -198,7 +199,7 @@ def list_suppliers(supplier_type=None):
     conn = get_connection()
     cur = conn.cursor()
     if supplier_type:
-        cur.execute("SELECT id, name, color_code FROM suppliers WHERE type=? ORDER BY name", (supplier_type,))
+        cur.execute("SELECT id, name, color_code, type FROM suppliers WHERE type=? ORDER BY name", (supplier_type,))
     else:
         cur.execute("SELECT id, name, type, color_code FROM suppliers ORDER BY name")
     rows = cur.fetchall()
@@ -246,6 +247,7 @@ def update_master_color_and_type(name, mtype, color_hex):
 def delete_master_by_name(name: str):
     """
     Safe delete: removes supplier if not referenced in purchases, batches, or dyeing outputs.
+    Default units are deletable.
     """
     if not name or not name.strip():
         return False
@@ -257,17 +259,20 @@ def delete_master_by_name(name: str):
         conn.close()
         return False
     sid = row["id"]
-    # Reference checks
-    for table, col in [
-        ("purchases", "supplier"),
-        ("purchases", "delivered_to"),
-        ("batches", "fabricator_id"),
-        ("dyeing_outputs", "dyeing_unit_id")
-    ]:
-        cur.execute(f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1", (name if col in ("supplier", "delivered_to") else sid,))
-        if cur.fetchone():
-            conn.close()
-            return False
+
+    # Skip reference check for default units
+    if name not in DEFAULT_NAMES:
+        for table, col in [
+            ("purchases", "supplier"),
+            ("purchases", "delivered_to"),
+            ("batches", "fabricator_id"),
+            ("dyeing_outputs", "dyeing_unit_id")
+        ]:
+            cur.execute(f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1", (name if col in ("supplier", "delivered_to") else sid,))
+            if cur.fetchone():
+                conn.close()
+                return False
+
     cur.execute("DELETE FROM suppliers WHERE id=?", (sid,))
     conn.commit()
     conn.close()
@@ -458,9 +463,7 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
         try:
             resolved_lot_id = int(str(lot_id).strip())
         except Exception:
-            resolved_lot_id = get_lot_id_by_no(str(lot_id).strip())
-    if not resolved_lot_id:
-        raise ValueError(f"Lot not found for '{lot_id}'")
+            resolved_lot_id = get_lot_id_by_no(lot_id)
     conn = get_connection()
     conn.execute("""
         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
@@ -468,15 +471,3 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
     """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
     conn.commit()
     conn.close()
-
-def delete_dyeing_output(dyeing_id: int):
-    conn = get_connection()
-    conn.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
-    conn.commit()
-    conn.close()
-
-# ----------------------------
-# Autocomplete (Delivered-To)
-# ----------------------------
-def search_delivered_to_prefix(prefix: str, limit: int = 20):
-    return search_suppliers_prefix(prefix=prefix, supplier_type=None, limit=limit)
