@@ -1,10 +1,11 @@
-# ui_fabricators.py
 import tkinter as tk
 from tkinter import ttk, messagebox
 from fabric_tracker_tk import db
 from datetime import datetime
 
-SHORTAGE_THRESHOLD_PERCENT = 5.0  # highlight threshold
+SHORTAGE_THRESHOLD_PERCENT = 5.0  # highlight threshold for general shortages
+DYEING_COMPLETION_THRESHOLD = 0.9  # 90% weight for completion
+DYEING_SHORTAGE_HIGHLIGHT = 10.0  # Highlight if shortage >10%
 
 def pastel_tint(hex_color, factor=0.85):
     """Return a lighter version of hex_color by mixing with white"""
@@ -28,7 +29,25 @@ class KnittingTab(ttk.Frame):
         self.reload_all()
 
     def build_ui(self):
-        top = ttk.Frame(self)
+        # Make the tab scrollable
+        self.canvas = tk.Canvas(self)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scroll_frame = ttk.Frame(self.canvas)
+
+        self.scroll_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        parent = self.scroll_frame  # Use scroll_frame as parent for content
+
+        top = ttk.Frame(parent)
         top.pack(fill="x", padx=6, pady=6)
 
         ttk.Label(top, text=f"Knitting Unit: {self.fabricator['name']}", font=("Arial", 12, "bold")).pack(side="left")
@@ -36,7 +55,7 @@ class KnittingTab(ttk.Frame):
         ttk.Button(top, text="Refresh", command=self.reload_all).pack(side="right", padx=4)
 
         # Inward Transactions
-        tx_frame = ttk.LabelFrame(self, text="Inward Transactions (Yarn received)")
+        tx_frame = ttk.LabelFrame(parent, text="Inward Transactions (Yarn received)")
         tx_frame.pack(fill="both", expand=True, padx=6, pady=6)
 
         cols = ("date", "supplier", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
@@ -47,7 +66,7 @@ class KnittingTab(ttk.Frame):
         self.tx_tree.pack(fill="both", expand=True)
 
         # Outward Transactions
-        out_tx_frame = ttk.LabelFrame(self, text="Outward Transactions (Yarn sent)")
+        out_tx_frame = ttk.LabelFrame(parent, text="Outward Transactions (Yarn sent)")
         out_tx_frame.pack(fill="both", expand=True, padx=6, pady=6)
 
         cols = ("date", "delivered_to", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
@@ -58,7 +77,7 @@ class KnittingTab(ttk.Frame):
         self.out_tx_tree.pack(fill="both", expand=True)
 
         # Batch Status
-        batch_frame = ttk.LabelFrame(self, text="Batches & Status")
+        batch_frame = ttk.LabelFrame(parent, text="Batches & Status")
         batch_frame.pack(fill="x", padx=6, pady=6)
         self.batch_tree = ttk.Treeview(batch_frame, columns=("batch_ref","product","expected","delivered","pending"), show="headings", height=6)
         for col, text, w in zip(("batch_ref","product","expected","delivered","pending"), ["Batch","Product","Expected","Delivered","Pending"], [120,200,80,80,80]):
@@ -68,7 +87,7 @@ class KnittingTab(ttk.Frame):
         self.batch_tree.bind("<Double-1>", self.on_batch_double)
 
         # Stock Summary
-        summary_frame = ttk.LabelFrame(self, text="Yarn Stock Summary (Current balance)")
+        summary_frame = ttk.LabelFrame(parent, text="Yarn Stock Summary (Current balance)")
         summary_frame.pack(fill="both", expand=True, padx=6, pady=6)
         self.summary_tree = ttk.Treeview(summary_frame, columns=("yarn_type","balance_kg","balance_rolls"), show="headings", height=8)
         for col, text, w in zip(("yarn_type","balance_kg","balance_rolls"), ["Yarn Type","Balance (kg)","Balance (rolls)"], [200,120,120]):
@@ -232,12 +251,30 @@ class DyeingTab(ttk.Frame):
         self.reload_all()
 
     def build_ui(self):
-        top = ttk.Frame(self)
+        # Make the tab scrollable
+        self.canvas = tk.Canvas(self)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.scroll_frame = ttk.Frame(self.canvas)
+
+        self.scroll_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        parent = self.scroll_frame  # Use scroll_frame as parent for content
+
+        top = ttk.Frame(parent)
         top.pack(fill="x", padx=6, pady=6)
         ttk.Label(top, text=f"Dyeing Unit: {self.fabricator['name']}", font=("Arial", 12, "bold")).pack(side="left")
         ttk.Button(top, text="Refresh", command=self.reload_all).pack(side="right")
 
-        pending_frame = ttk.LabelFrame(self, text="Pending Batches")
+        pending_frame = ttk.LabelFrame(parent, text="Pending Batches")
         pending_frame.pack(fill="both", expand=True, padx=6, pady=6)
         cols = ("batch_ref","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
         headings = ["Batch","Lot","Type","Orig (kg)","Orig (rolls)","Returned (kg)","Returned (rolls)","Short (kg)","Short (%)"]
@@ -248,7 +285,7 @@ class DyeingTab(ttk.Frame):
             self.pending_tree.column(c, width=w)
         self.pending_tree.pack(fill="both", expand=True)
 
-        completed_frame = ttk.LabelFrame(self, text="Completed Batches")
+        completed_frame = ttk.LabelFrame(parent, text="Completed Batches")
         completed_frame.pack(fill="both", expand=True, padx=6, pady=6)
         self.completed_tree = ttk.Treeview(completed_frame, columns=cols, show="headings", height=8)
         for c,h,w in zip(cols, headings, widths):
@@ -287,10 +324,11 @@ class DyeingTab(ttk.Frame):
             out = cur.fetchone()
             rkg = out["rkg"] or 0
             rrolls = out["rrolls"] or 0
-            short_kg = orig_kg - rkg
-            short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
-            tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
-            self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+            if rkg < DYEING_COMPLETION_THRESHOLD * orig_kg:
+                short_kg = orig_kg - rkg
+                short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
+                tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
+                self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.pending_tree.tag_configure("short", background="#ffcccc")
         conn.close()
 
@@ -320,11 +358,11 @@ class DyeingTab(ttk.Frame):
             out = cur.fetchone()
             rkg = out["rkg"] or 0
             rrolls = out["rrolls"] or 0
-            if rrolls >= orig_rolls and orig_rolls>0:
+            if rkg >= DYEING_COMPLETION_THRESHOLD * orig_kg:
                 short_kg = orig_kg - rkg
-                short_pct = (short_kg / orig_kg * 100) if orig_kg>0 else 0
-                tag = "short" if short_pct>SHORTAGE_THRESHOLD_PERCENT else ""
-                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, "", orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
+                short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
+                tag = "short" if short_pct > DYEING_SHORTAGE_HIGHLIGHT else ""
+                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, lot["yarn_type"], orig_kg, orig_rolls, rkg, rrolls, round(short_kg,2), round(short_pct,2)), tags=(tag,))
         self.completed_tree.tag_configure("short", background="#ffcccc")
         conn.close()
 
