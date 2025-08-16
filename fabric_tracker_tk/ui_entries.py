@@ -502,8 +502,9 @@ class EntriesFrame(ttk.Frame):
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT d.id, d.lot_id, s.name as unit, d.returned_date, d.returned_qty_kg, d.returned_qty_rolls, d.notes
+            SELECT d.id, l.lot_no as lot_id, s.name as unit, d.returned_date, d.returned_qty_kg, d.returned_qty_rolls, d.notes
             FROM dyeing_outputs d
+            LEFT JOIN lots l ON d.lot_id = l.id
             LEFT JOIN suppliers s ON d.dyeing_unit_id = s.id
             ORDER BY d.returned_date DESC
         """)
@@ -515,7 +516,7 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def save_dyeing(self):
-        lot_id = self.dyeing_lot_e.get().strip()
+        lot_no = self.dyeing_lot_e.get().strip()  # Use lot_no string
         unit = self.dyeing_unit_cb.get().strip()
         returned_date = self.returned_date_e.get().strip()
         try:
@@ -525,7 +526,7 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid", "Qty must be numeric")
             return
         notes = self.returned_notes_e.get().strip()
-        if not lot_id or not unit or (kg==0 and rolls==0):
+        if not lot_no or not unit or (kg==0 and rolls==0):
             messagebox.showwarning("Missing", "Please fill required fields")
             return
         # Get dyeing unit ID (must exist)
@@ -538,6 +539,12 @@ class EntriesFrame(ttk.Frame):
             conn.close()
             return
         unit_id = row["id"]
+        # Resolve lot_no to lot_id
+        lot_id = db.get_lot_id_by_no(lot_no)
+        if lot_id is None:
+            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' not found. Create the lot first.")
+            conn.close()
+            return
         try:
             if self.selected_dyeing_id:
                 cur.execute("""
@@ -556,6 +563,8 @@ class EntriesFrame(ttk.Frame):
         self.clear_dyeing_form()
         self.selected_dyeing_id = None
         self.reload_dyeing_outputs()
+        if self.controller and hasattr(self.controller, "fabricators_frame"):
+            self.controller.fabricators_frame.build_tabs()  # Refresh Fabricators to reflect correlation
 
     def clear_dyeing_form(self):
         self.dyeing_lot_e.delete(0, tk.END)
@@ -581,7 +590,7 @@ class EntriesFrame(ttk.Frame):
             return
         self.selected_dyeing_id = dyeing_id
         self.dyeing_lot_e.delete(0, tk.END)
-        self.dyeing_lot_e.insert(0, row["lot_id"])
+        self.dyeing_lot_e.insert(0, db.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],)).fetchone()["lot_no"])
         self.dyeing_unit_cb.set(row["unit_name"])
         self.returned_date_e.delete(0, tk.END)
         self.returned_date_e.insert(0, db.db_to_ui_date(row["returned_date"]))
