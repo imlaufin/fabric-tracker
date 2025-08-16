@@ -490,3 +490,9 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
     """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
     conn.commit()
     conn.close()
+
+def delete_dyeing_output(dyeing_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
+    conn.commit()
+    conn.close()
