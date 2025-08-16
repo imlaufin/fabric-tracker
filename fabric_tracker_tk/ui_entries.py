@@ -5,12 +5,6 @@ from fabric_tracker_tk import db
 
 # ---------------- Autocomplete Combobox ----------------
 class AutocompleteCombobox(ttk.Combobox):
-    """
-    ttk.Combobox with live filtering.
-    - Typing filters dropdown items (case-insensitive, startswith match)
-    - If exactly one match, auto-completes
-    - Allows free text not in the master list
-    """
     def __init__(self, master=None, **kwargs):
         super().__init__(master, **kwargs)
         self._all_values = []
@@ -31,11 +25,9 @@ class AutocompleteCombobox(ttk.Combobox):
         self.after_idle(lambda: self.select_range(0, tk.END))
 
     def _on_focusout(self, _e):
-        # If leaving field and text is empty, do nothing
         txt = self.get().strip()
         if not txt:
             return
-        # Keep text as-is (do not force snap) so free entries are allowed
 
     def _on_select(self, _e):
         self["values"] = self._all_values
@@ -49,14 +41,11 @@ class AutocompleteCombobox(ttk.Combobox):
             return
         cf = txt.casefold()
         matches = [orig for (orig, c) in self._casefold_values if c.startswith(cf)]
-        # Update dropdown list
         self["values"] = matches if matches else self._all_values
-        # Only auto-fill if exactly 1 match AND not deleting
         if len(matches) == 1 and e.keysym != "BackSpace":
             self.set(matches[0])
             self.icursor(len(txt))
             self.select_range(len(txt), tk.END)
-        # Show dropdown when typing new characters
         if txt != self._last_typed:
             self.event_generate("<Down>")
         self._last_typed = txt
@@ -67,7 +56,6 @@ class EntriesFrame(ttk.Frame):
         self.controller = controller
         self.selected_purchase_id = None
         self.selected_dyeing_id = None
-        # Remember last entered values for faster bulk entry
         self._last_purchase_defaults = {
             "date": datetime.today().strftime("%d/%m/%Y"),
             "batch": "",
@@ -82,25 +70,20 @@ class EntriesFrame(ttk.Frame):
         self.reload_dyeing_outputs()
 
     def build_ui(self):
-        # Notebook for Purchases / Dyeing Outputs
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
-        # --- Purchases Tab ---
         self.tab_purchases = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_purchases, text="Purchases")
         self.build_purchase_form(self.tab_purchases)
         self.build_purchase_table(self.tab_purchases)
-        # --- Dyeing Outputs Tab ---
         self.tab_dyeing = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_dyeing, text="Dyeing Outputs")
         self.build_dyeing_form(self.tab_dyeing)
         self.build_dyeing_table(self.tab_dyeing)
 
-    # ---------------- Purchases ----------------
     def build_purchase_form(self, parent):
         frm = ttk.Frame(parent)
         frm.pack(fill="x", padx=8, pady=8)
-        # Form labels and entries
         ttk.Label(frm, text="Date").grid(row=0, column=0, sticky="w")
         self.date_e = ttk.Entry(frm, width=12)
         self.date_e.grid(row=0, column=1, sticky="w")
@@ -129,19 +112,16 @@ class EntriesFrame(ttk.Frame):
         ttk.Label(frm, text="Delivered To").grid(row=3, column=0, sticky="w")
         self.delivered_cb = AutocompleteCombobox(frm, width=25)
         self.delivered_cb.grid(row=3, column=1, sticky="w")
-        # Action buttons
         ttk.Button(frm, text="Save", command=self.save_purchase).grid(row=4, column=0, pady=8, sticky="w")
         ttk.Button(frm, text="Clear (Qty/Lot)", command=self.clear_purchase_form).grid(row=4, column=1, sticky="w")
         ttk.Button(frm, text="Create Lots", command=self.create_lot_dialog).grid(row=4, column=2, sticky="w")
         ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3, sticky="w")
-        # Ensure delivered-to snaps to best match on Enter
         self.delivered_cb.bind("<Return>", lambda e: self._snap_autocomplete(self.delivered_cb))
 
-    def _snap_autocomplete(self, combo: AutocompleteCombobox):
+    def _snap_autocomplete(self, combo):
         txt = combo.get().strip()
         if not txt:
             return
-        # If typed text is a prefix of any value, set to first match
         values = list(combo["values"])
         for v in values:
             if v.lower().startswith(txt.lower()):
@@ -149,12 +129,11 @@ class EntriesFrame(ttk.Frame):
                 break
 
     def build_purchase_table(self, parent):
-        cols = ("date","batch","lot","supplier","yarn","kg","rolls","price","delivered")
-        headings = ["Date","Batch","Lot","Supplier","Yarn Type","Kg","Rolls","Price/unit","Delivered"]
-        widths = [90,90,110,150,150,80,80,80,140]
+        cols = ("date", "batch", "lot", "supplier", "yarn", "kg", "rolls", "price", "delivered")
+        headings = ["Date", "Batch", "Lot", "Supplier", "Yarn Type", "Kg", "Rolls", "Price/unit", "Delivered"]
+        widths = [90, 90, 110, 150, 150, 80, 80, 80, 140]
         frame = ttk.Frame(parent)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
-        # Scrollbars
         self.tree_scroll_y = ttk.Scrollbar(frame, orient="vertical")
         self.tree_scroll_y.pack(side="right", fill="y")
         self.tree_scroll_x = ttk.Scrollbar(frame, orient="horizontal")
@@ -164,11 +143,11 @@ class EntriesFrame(ttk.Frame):
         self.tree.pack(fill="both", expand=True)
         self.tree_scroll_y.config(command=self.tree.yview)
         self.tree_scroll_x.config(command=self.tree.xview)
-        for c,h,w in zip(cols, headings, widths):
+        for c, h, w in zip(cols, headings, widths):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
         self.tree.bind("<Double-1>", self.on_purchase_double_click)
-        self.tree.bind("<Button-3>", self.show_purchase_context_menu)  # Right-click binding
+        self.tree.bind("<Button-3>", self.show_purchase_context_menu)
 
     def show_purchase_context_menu(self, event):
         item = self.tree.identify_row(event.y)
@@ -183,12 +162,8 @@ class EntriesFrame(ttk.Frame):
             db.delete_purchase(purchase_id)
             self.reload_entries()
             if self.controller and hasattr(self.controller, "fabricators_frame"):
-                try:
-                    self.controller.fabricators_frame.build_tabs()
-                except Exception:
-                    pass
+                self.controller.fabricators_frame.build_tabs()
 
-    # ---------------- Dyeing Outputs ----------------
     def build_dyeing_form(self, parent):
         frm = ttk.Frame(parent)
         frm.pack(fill="x", padx=8, pady=8)
@@ -211,14 +186,13 @@ class EntriesFrame(ttk.Frame):
         ttk.Label(frm, text="Notes").grid(row=2, column=0, sticky="w")
         self.returned_notes_e = ttk.Entry(frm, width=50)
         self.returned_notes_e.grid(row=2, column=1, columnspan=5, sticky="w")
-        # Action buttons
         ttk.Button(frm, text="Save", command=self.save_dyeing).grid(row=3, column=0, pady=8, sticky="w")
         ttk.Button(frm, text="Clear", command=self.clear_dyeing_form).grid(row=3, column=1, sticky="w")
 
     def build_dyeing_table(self, parent):
-        cols = ("lot_id","unit","date","kg","rolls","notes")
-        headings = ["Lot","Dyeing Unit","Returned Date","Kg","Rolls","Notes"]
-        widths = [100,150,90,80,80,200]
+        cols = ("lot_id", "unit", "date", "kg", "rolls", "notes")
+        headings = ["Lot", "Dyeing Unit", "Returned Date", "Kg", "Rolls", "Notes"]
+        widths = [100, 150, 90, 80, 80, 200]
         frame = ttk.Frame(parent)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
         self.dye_tree_scroll_y = ttk.Scrollbar(frame, orient="vertical")
@@ -231,11 +205,11 @@ class EntriesFrame(ttk.Frame):
         self.dye_tree.pack(fill="both", expand=True)
         self.dye_tree_scroll_y.config(command=self.dye_tree.yview)
         self.dye_tree_scroll_x.config(command=self.dye_tree.xview)
-        for c,h,w in zip(cols, headings, widths):
+        for c, h, w in zip(cols, headings, widths):
             self.dye_tree.heading(c, text=h)
             self.dye_tree.column(c, width=w)
         self.dye_tree.bind("<Double-1>", self.on_dyeing_double_click)
-        self.dye_tree.bind("<Button-3>", self.show_dyeing_context_menu)  # Right-click binding
+        self.dye_tree.bind("<Button-3>", self.show_dyeing_context_menu)
 
     def show_dyeing_context_menu(self, event):
         item = self.dye_tree.identify_row(event.y)
@@ -250,18 +224,14 @@ class EntriesFrame(ttk.Frame):
             db.delete_dyeing_output(dyeing_id)
             self.reload_dyeing_outputs()
 
-    # ---------------- Lists / Refresh ----------------
     def refresh_lists(self):
-        # Suppliers, delivered_to, yarn types, dyeing units
         suppliers = [r["name"] for r in db.list_suppliers()]
         yarn_types = db.list_yarn_types()
         dyeing_units = [r["name"] for r in db.list_suppliers("dyeing_unit")]
-        # Set full lists and bind to autocompletes
         self.supplier_cb.set_completion_list(suppliers)
         self.delivered_cb.set_completion_list(suppliers)
         self.yarn_cb.set_completion_list(yarn_types)
         self.dyeing_unit_cb.set_completion_list(dyeing_units)
-        # If we have remembered defaults, set them (useful after first save)
         if self._last_purchase_defaults["supplier"]:
             self.supplier_cb.set(self._last_purchase_defaults["supplier"])
         if self._last_purchase_defaults["yarn"]:
@@ -269,9 +239,7 @@ class EntriesFrame(ttk.Frame):
         if self._last_purchase_defaults["delivered"]:
             self.delivered_cb.set(self._last_purchase_defaults["delivered"])
 
-    # ---------------- Helpers: ensure masters exist ----------------
     def _ensure_supplier_exists(self, name, supplier_type=None):
-        """Insert supplier into masters if missing."""
         name = (name or "").strip()
         if not name:
             return
@@ -291,13 +259,11 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def _ensure_yarn_type_exists(self, name):
-        """Insert yarn type into masters if missing."""
         name = (name or "").strip()
         if not name:
             return
         db.add_yarn_type(name)
 
-    # ---------------- Purchases Functions ----------------
     def reload_entries(self):
         for r in self.tree.get_children():
             self.tree.delete(r)
@@ -328,32 +294,25 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid", "Qty or Price must be numeric")
             return
 
-        # Call validation & snapping helper
         self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
 
     def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
-        # Check required fields
         if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
             messagebox.showwarning("Missing", "Please fill required fields")
             return
 
-        # Snap delivered-to to first matching master (autocomplete behavior)
         self._snap_autocomplete(self.delivered_cb)
         delivered = self.delivered_cb.get().strip()
 
-        # Auto-add Delivered To if new
         if delivered and delivered not in list(self.delivered_cb["values"]):
             self._ensure_supplier_exists(delivered, supplier_type="supplier")
 
-        # Auto-add Supplier if new
         if supplier and supplier not in list(self.supplier_cb["values"]):
             self._ensure_supplier_exists(supplier, supplier_type="supplier")
 
-        # Auto-add Yarn if new
         if yarn and yarn not in list(self.yarn_cb["values"]):
             self._ensure_yarn_type_exists(yarn)
 
-        # Record or edit purchase in database
         try:
             if self.selected_purchase_id:
                 db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
@@ -363,7 +322,6 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid Date", str(e))
             return
 
-        # Remember values for bulk entries (preserve on clear)
         self._last_purchase_defaults.update({
             "date": date,
             "batch": batch,
@@ -373,26 +331,18 @@ class EntriesFrame(ttk.Frame):
             "delivered": delivered,
         })
 
-        # Update dropdown lists so the new masters are immediately available
         self.refresh_lists()
         self.reload_entries()
-        # Clear only fields that change per item (Lot/Qty), keep the rest
         self.clear_purchase_form(keep_defaults=True)
         self.selected_purchase_id = None
         if self.controller and hasattr(self.controller, "fabricators_frame"):
-            try:
-                self.controller.fabricators_frame.build_tabs()
-            except Exception:
-                pass
+            self.controller.fabricators_frame.build_tabs()
 
     def clear_purchase_form(self, keep_defaults=True):
-        """If keep_defaults=True, preserve date/batch/supplier/yarn/price/delivered."""
-        # Always clear lot/qty fields for bulk entry speed
         self.lot_e.delete(0, tk.END)
         self.kg_e.delete(0, tk.END)
         self.rolls_e.delete(0, tk.END)
         if keep_defaults:
-            # Re-apply remembered defaults
             self.date_e.delete(0, tk.END)
             self.date_e.insert(0, self._last_purchase_defaults["date"])
             self.batch_e.delete(0, tk.END)
@@ -403,7 +353,6 @@ class EntriesFrame(ttk.Frame):
             self.price_e.insert(0, self._last_purchase_defaults["price"])
             self.delivered_cb.set(self._last_purchase_defaults["delivered"])
         else:
-            # Full reset
             self.batch_e.delete(0, tk.END)
             self.price_e.delete(0, tk.END)
             self.date_e.delete(0, tk.END)
@@ -411,7 +360,6 @@ class EntriesFrame(ttk.Frame):
             self.supplier_cb.set("")
             self.yarn_cb.set("")
             self.delivered_cb.set("")
-            # Update defaults too
             self._last_purchase_defaults = {
                 "date": self.date_e.get(),
                 "batch": "",
@@ -432,11 +380,11 @@ class EntriesFrame(ttk.Frame):
         cur.execute("SELECT id, expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
         row = cur.fetchone()
         if not row:
+            fabricator_name = self.delivered_cb.get().strip()
+            cur.execute("SELECT id FROM suppliers WHERE name=?", (fabricator_name,))
+            fr = cur.fetchone()
+            fid = fr["id"] if fr else None
             if messagebox.askyesno("Batch not found", "Batch not found. Create new batch?"):
-                fabricator_name = self.delivered_cb.get().strip()
-                cur.execute("SELECT id FROM suppliers WHERE name=?", (fabricator_name,))
-                fr = cur.fetchone()
-                fid = fr["id"] if fr else None
                 b_id = db.create_batch(batch_ref, fid, "", 0, "")
             else:
                 conn.close()
@@ -445,17 +393,19 @@ class EntriesFrame(ttk.Frame):
             b_id = row["id"]
         try:
             lots = int(simpledialog.askstring("Lots", "How many lots to create?", parent=self) or "0")
-        except Exception:
+        except ValueError:
             lots = 0
         if lots <= 0:
             conn.close()
             return
         cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
         maxidx = cur.fetchone()["maxidx"] or 0
-        for i in range(1, lots+1):
-            db.create_lot(b_id, maxidx+i)
+        for i in range(1, lots + 1):
+            lot_no = f"{batch_ref}/{maxidx + i}"
+            cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index) VALUES (?, ?, ?)", (b_id, lot_no, maxidx + i))
+        conn.commit()
         conn.close()
-        messagebox.showinfo("Done", f"{lots} lots created.")
+        messagebox.showinfo("Done", f"{lots} lots created for batch {batch_ref}.")
 
     def on_purchase_double_click(self, event):
         item = self.tree.selection()
@@ -485,7 +435,6 @@ class EntriesFrame(ttk.Frame):
         self.price_e.delete(0, tk.END)
         self.price_e.insert(0, row["price_per_unit"])
         self.delivered_cb.set(row["delivered_to"])
-        # Also refresh the remembered defaults based on this record
         self._last_purchase_defaults.update({
             "date": self.date_e.get(),
             "batch": self.batch_e.get(),
@@ -495,7 +444,6 @@ class EntriesFrame(ttk.Frame):
             "delivered": self.delivered_cb.get(),
         })
 
-    # ---------------- Dyeing Outputs Functions ----------------
     def reload_dyeing_outputs(self):
         for r in self.dye_tree.get_children():
             self.dye_tree.delete(r)
@@ -516,7 +464,7 @@ class EntriesFrame(ttk.Frame):
         conn.close()
 
     def save_dyeing(self):
-        lot_no = self.dyeing_lot_e.get().strip()  # Use lot_no string
+        lot_no = self.dyeing_lot_e.get().strip()
         unit = self.dyeing_unit_cb.get().strip()
         returned_date = self.returned_date_e.get().strip()
         try:
@@ -526,10 +474,9 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid", "Qty must be numeric")
             return
         notes = self.returned_notes_e.get().strip()
-        if not lot_no or not unit or (kg==0 and rolls==0):
+        if not lot_no or not unit or (kg == 0 and rolls == 0):
             messagebox.showwarning("Missing", "Please fill required fields")
             return
-        # Get dyeing unit ID (must exist)
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
@@ -539,7 +486,6 @@ class EntriesFrame(ttk.Frame):
             conn.close()
             return
         unit_id = row["id"]
-        # Resolve lot_no to lot_id
         lot_id = db.get_lot_id_by_no(lot_no)
         if lot_id is None:
             messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' not found. Create the lot first.")
@@ -564,7 +510,7 @@ class EntriesFrame(ttk.Frame):
         self.selected_dyeing_id = None
         self.reload_dyeing_outputs()
         if self.controller and hasattr(self.controller, "fabricators_frame"):
-            self.controller.fabricators_frame.build_tabs()  # Refresh Fabricators to reflect correlation
+            self.controller.fabricators_frame.build_tabs()
 
     def clear_dyeing_form(self):
         self.dyeing_lot_e.delete(0, tk.END)
@@ -590,7 +536,14 @@ class EntriesFrame(ttk.Frame):
             return
         self.selected_dyeing_id = dyeing_id
         self.dyeing_lot_e.delete(0, tk.END)
-        self.dyeing_lot_e.insert(0, db.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],)).fetchone()["lot_no"])
+        # Fix for AttributeError: use get_connection and cursor
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
+        lot_row = cur.fetchone()
+        conn.close()
+        if lot_row:
+            self.dyeing_lot_e.insert(0, lot_row["lot_no"])
         self.dyeing_unit_cb.set(row["unit_name"])
         self.returned_date_e.delete(0, tk.END)
         self.returned_date_e.insert(0, db.db_to_ui_date(row["returned_date"]))
