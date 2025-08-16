@@ -401,9 +401,7 @@ class EntriesFrame(ttk.Frame):
         cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
         maxidx = cur.fetchone()["maxidx"] or 0
         for i in range(1, lots + 1):
-            lot_no = f"{batch_ref}/{maxidx + i}"
-            cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index) VALUES (?, ?, ?)", (b_id, lot_no, maxidx + i))
-        conn.commit()
+            db.create_lot(b_id, maxidx + i)
         conn.close()
         messagebox.showinfo("Done", f"{lots} lots created for batch {batch_ref}.")
 
@@ -486,9 +484,21 @@ class EntriesFrame(ttk.Frame):
             conn.close()
             return
         unit_id = row["id"]
+        # Cross-reference lot_no with existing lots
         lot_id = db.get_lot_id_by_no(lot_no)
         if lot_id is None:
-            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' not found. Create the lot first.")
+            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Please use a lot number from the 'Pending Batches' list.")
+            conn.close()
+            return
+        # Verify the lot is associated with this dyeing unit's pending batches
+        cur.execute("""
+            SELECT p.batch_id, p.lot_no
+            FROM purchases p
+            WHERE p.lot_no = ? AND p.delivered_to = ?
+        """, (lot_no, unit))
+        pending_lot = cur.fetchone()
+        if not pending_lot:
+            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not assigned to '{unit}' in pending batches.")
             conn.close()
             return
         try:
@@ -536,7 +546,6 @@ class EntriesFrame(ttk.Frame):
             return
         self.selected_dyeing_id = dyeing_id
         self.dyeing_lot_e.delete(0, tk.END)
-        # Fix for AttributeError: use get_connection and cursor
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
