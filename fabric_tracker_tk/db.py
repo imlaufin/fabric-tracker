@@ -403,22 +403,24 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
         VALUES (?, ?, ?, ?, ?)
     """, (batch_ref, fabricator_id, product_name, expected_lots, composition))
     bid = cur.lastrowid
+    conn.commit()  # Commit batch immediately
     for i in range(1, expected_lots + 1):
         create_lot(bid, i)
-    conn.commit()
     conn.close()
     return bid
 
 def create_lot(batch_id, lot_index):
     conn = get_connection()
     cur = conn.cursor()
-    batch_ref = cur.execute("SELECT batch_ref FROM batches WHERE id=?", (batch_id,)).fetchone()["batch_ref"]
+    row = cur.execute("SELECT batch_ref FROM batches WHERE id=?", (batch_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Batch ID {batch_id} not found. Ensure the batch was created successfully.")
+    batch_ref = row["batch_ref"]
     lot_no = f"{batch_ref}/{lot_index}"
     cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index) VALUES (?, ?, ?)", (batch_id, lot_no, lot_index))
-    lid = cur.lastrowid
-    conn.commit()
+    conn.commit()  # Commit each lot
     conn.close()
-    return lid
+    return cur.lastrowid
 
 def get_lot_id_by_no(lot_no: str):
     if not lot_no or not lot_no.strip():
