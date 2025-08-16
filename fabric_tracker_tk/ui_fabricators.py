@@ -46,6 +46,17 @@ class KnittingTab(ttk.Frame):
             self.tx_tree.column(c, width=w)
         self.tx_tree.pack(fill="both", expand=True)
 
+        # Outward Transactions
+        out_tx_frame = ttk.LabelFrame(self, text="Outward Transactions (Yarn sent)")
+        out_tx_frame.pack(fill="both", expand=True, padx=6, pady=6)
+
+        cols = ("date", "delivered_to", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
+        self.out_tx_tree = ttk.Treeview(out_tx_frame, columns=cols, show="headings", height=8)
+        for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Delivered To","Type","Kg","Rolls","Batch","Lot"]):
+            self.out_tx_tree.heading(c, text=h)
+            self.out_tx_tree.column(c, width=w)
+        self.out_tx_tree.pack(fill="both", expand=True)
+
         # Batch Status
         batch_frame = ttk.LabelFrame(self, text="Batches & Status")
         batch_frame.pack(fill="x", padx=6, pady=6)
@@ -67,6 +78,7 @@ class KnittingTab(ttk.Frame):
 
     def reload_all(self):
         self.load_inward_transactions()
+        self.load_outward_transactions()
         self.load_batches()
         self.load_stock_summary()
 
@@ -89,6 +101,26 @@ class KnittingTab(ttk.Frame):
             self.tx_tree.insert("", "end", values=(display_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
         conn.close()
 
+    def load_outward_transactions(self):
+        for r in self.out_tx_tree.get_children():
+            self.out_tx_tree.delete(r)
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT date, delivered_to, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
+            FROM purchases
+            WHERE supplier=? AND delivered_to != ?
+            ORDER BY date DESC
+        """, (self.fabricator["name"], self.fabricator["name"]))
+        for row in cur.fetchall():
+            display_date = row["date"]
+            try:
+                display_date = db.db_to_ui_date(row["date"])
+            except Exception:
+                pass
+            self.out_tx_tree.insert("", "end", values=(display_date, row["delivered_to"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
+        conn.close()
+
     def load_batches(self):
         for r in self.batch_tree.get_children():
             self.batch_tree.delete(r)
@@ -96,7 +128,7 @@ class KnittingTab(ttk.Frame):
         cur = conn.cursor()
         cur.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (self.fabricator["id"],))
         for b in cur.fetchall():
-            cur.execute("SELECT COUNT(*) as cnt FROM purchases WHERE batch_id=? AND delivered_to=?", (b["batch_ref"], self.fabricator["name"]))
+            cur.execute("SELECT COUNT(DISTINCT lot_no) as cnt FROM purchases WHERE batch_id=? AND delivered_to=?", (b["batch_ref"], self.fabricator["name"]))
             delivered = cur.fetchone()["cnt"] or 0
             expected = b["expected_lots"] or 0
             pending = max(0, expected - delivered)
@@ -163,14 +195,32 @@ class KnittingTab(ttk.Frame):
             self.summary_tree.delete(r)
         conn = db.get_connection()
         cur = conn.cursor()
+        # Inwards
         cur.execute("""
-            SELECT yarn_type, SUM(qty_kg) as kg_sum, SUM(qty_rolls) as rolls_sum
+            SELECT yarn_type, SUM(qty_kg) as kg_in, SUM(qty_rolls) as rolls_in
             FROM purchases
             WHERE delivered_to=?
             GROUP BY yarn_type
         """, (self.fabricator["name"],))
-        for r in cur.fetchall():
-            self.summary_tree.insert("", "end", values=(r["yarn_type"], r["kg_sum"] or 0, r["rolls_sum"] or 0))
+        inwards = {row["yarn_type"]: (row["kg_in"] or 0, row["rolls_in"] or 0) for row in cur.fetchall()}
+        
+        # Outwards (transfers sent out)
+        cur.execute("""
+            SELECT yarn_type, SUM(qty_kg) as kg_out, SUM(qty_rolls) as rolls_out
+            FROM purchases
+            WHERE supplier=? AND delivered_to != ?
+            GROUP BY yarn_type
+        """, (self.fabricator["name"], self.fabricator["name"]))
+        outwards = {row["yarn_type"]: (row["kg_out"] or 0, row["rolls_out"] or 0) for row in cur.fetchall()}
+        
+        # Net balance per yarn type
+        yarn_types = set(inwards.keys()).union(outwards.keys())
+        for yarn_type in sorted(yarn_types):
+            kg_in, rolls_in = inwards.get(yarn_type, (0, 0))
+            kg_out, rolls_out = outwards.get(yarn_type, (0, 0))
+            net_kg = kg_in - kg_out
+            net_rolls = rolls_in - rolls_out
+            self.summary_tree.insert("", "end", values=(yarn_type, net_kg, net_rolls))
         conn.close()
 
 class DyeingTab(ttk.Frame):
