@@ -29,7 +29,7 @@ class KnittingTab(ttk.Frame):
         self.reload_all()
 
     def build_ui(self):
-        # Make the tab scrollable with proper resizing
+        # Make the tab scrollable
         self.canvas = tk.Canvas(self)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.scroll_frame = ttk.Frame(self.canvas)
@@ -45,7 +45,10 @@ class KnittingTab(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        parent = self.scroll_frame  # Use scroll_frame as parent for content
+        # Bind to resize to eliminate empty space on right
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+
+        parent = self.scroll_frame
 
         top = ttk.Frame(parent)
         top.pack(fill="x", padx=6, pady=6)
@@ -60,7 +63,7 @@ class KnittingTab(ttk.Frame):
 
         cols = ("date", "supplier", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
         self.tx_tree = ttk.Treeview(tx_frame, columns=cols, show="headings", height=8)
-        for c, w, h in zip(cols, [100, 150, 150, 90, 90, 90, 120], ["Date", "Supplier", "Type", "Kg", "Rolls", "Batch", "Lot"]):
+        for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Supplier","Type","Kg","Rolls","Batch","Lot"]):
             self.tx_tree.heading(c, text=h)
             self.tx_tree.column(c, width=w)
         self.tx_tree.pack(fill="both", expand=True)
@@ -71,7 +74,7 @@ class KnittingTab(ttk.Frame):
 
         cols = ("date", "delivered_to", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
         self.out_tx_tree = ttk.Treeview(out_tx_frame, columns=cols, show="headings", height=8)
-        for c, w, h in zip(cols, [100, 150, 150, 90, 90, 90, 120], ["Date", "Delivered To", "Type", "Kg", "Rolls", "Batch", "Lot"]):
+        for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Delivered To","Type","Kg","Rolls","Batch","Lot"]):
             self.out_tx_tree.heading(c, text=h)
             self.out_tx_tree.column(c, width=w)
         self.out_tx_tree.pack(fill="both", expand=True)
@@ -79,21 +82,24 @@ class KnittingTab(ttk.Frame):
         # Batch Status
         batch_frame = ttk.LabelFrame(parent, text="Batches & Status")
         batch_frame.pack(fill="x", padx=6, pady=6)
-        self.batch_tree = ttk.Treeview(batch_frame, columns=("batch_ref", "product", "expected", "delivered", "pending"), show="headings", height=6)
-        for col, text, w in zip(("batch_ref", "product", "expected", "delivered", "pending"), ["Batch", "Product", "Expected", "Delivered", "Pending"], [120, 200, 80, 80, 80]):
+        self.batch_tree = ttk.Treeview(batch_frame, columns=("batch_ref","product","expected","delivered","pending"), show="headings", height=6)
+        for col, text, w in zip(("batch_ref","product","expected","delivered","pending"), ["Batch","Product","Expected","Delivered","Pending"], [120,200,80,80,80]):
             self.batch_tree.heading(col, text=text)
             self.batch_tree.column(col, width=w)
         self.batch_tree.pack(fill="x", expand=True)
         self.batch_tree.bind("<Double-1>", self.on_batch_double)
 
-        # Stock Summary
-        summary_frame = ttk.LabelFrame(parent, text="Yarn Stock Summary (Current balance)")
+        # Stock Summary (only Kg for knitting)
+        summary_frame = ttk.LabelFrame(parent, text="Yarn Stock Summary (Current balance in Kg)")
         summary_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        self.summary_tree = ttk.Treeview(summary_frame, columns=("yarn_type", "balance_kg", "balance_rolls"), show="headings", height=8)
-        for col, text, w in zip(("yarn_type", "balance_kg", "balance_rolls"), ["Yarn Type", "Balance (kg)", "Balance (rolls)"], [200, 120, 120]):
+        self.summary_tree = ttk.Treeview(summary_frame, columns=("yarn_type","balance_kg"), show="headings", height=8)
+        for col, text, w in zip(("yarn_type","balance_kg"), ["Yarn Type","Balance (kg)"], [200,120]):
             self.summary_tree.heading(col, text=text)
             self.summary_tree.column(col, width=w)
         self.summary_tree.pack(fill="both", expand=True)
+
+    def on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas.find_withtag("all"), width=event.width)
 
     def reload_all(self):
         self.load_inward_transactions()
@@ -208,30 +214,29 @@ class KnittingTab(ttk.Frame):
         cur = conn.cursor()
         # Inwards
         cur.execute("""
-            SELECT yarn_type, SUM(qty_kg) as kg_in, SUM(qty_rolls) as rolls_in
+            SELECT yarn_type, SUM(qty_kg) as kg_in
             FROM purchases
             WHERE delivered_to=?
             GROUP BY yarn_type
         """, (self.fabricator["name"],))
-        inwards = {row["yarn_type"]: (row["kg_in"] or 0, row["rolls_in"] or 0) for row in cur.fetchall()}
+        inwards = {row["yarn_type"]: row["kg_in"] or 0 for row in cur.fetchall()}
         
         # Outwards (transfers sent out)
         cur.execute("""
-            SELECT yarn_type, SUM(qty_kg) as kg_out, SUM(qty_rolls) as rolls_out
+            SELECT yarn_type, SUM(qty_kg) as kg_out
             FROM purchases
             WHERE supplier=? AND delivered_to != ?
             GROUP BY yarn_type
         """, (self.fabricator["name"], self.fabricator["name"]))
-        outwards = {row["yarn_type"]: (row["kg_out"] or 0, row["rolls_out"] or 0) for row in cur.fetchall()}
+        outwards = {row["yarn_type"]: row["kg_out"] or 0 for row in cur.fetchall()}
         
-        # Net balance per yarn type
+        # Net balance per yarn type (Kg only, clamp to 0 if negative)
         yarn_types = set(inwards.keys()).union(outwards.keys())
         for yarn_type in sorted(yarn_types):
-            kg_in, rolls_in = inwards.get(yarn_type, (0, 0))
-            kg_out, rolls_out = outwards.get(yarn_type, (0, 0))
-            net_kg = kg_in - kg_out
-            net_rolls = rolls_in - rolls_out
-            self.summary_tree.insert("", "end", values=(yarn_type, net_kg, net_rolls))
+            kg_in = inwards.get(yarn_type, 0)
+            kg_out = outwards.get(yarn_type, 0)
+            net_kg = max(0, kg_in - kg_out)  # Clamp to 0 to avoid negative
+            self.summary_tree.insert("", "end", values=(yarn_type, net_kg))
         conn.close()
 
 class DyeingTab(ttk.Frame):
@@ -243,7 +248,6 @@ class DyeingTab(ttk.Frame):
         self.reload_all()
 
     def build_ui(self):
-        # Make the tab scrollable with proper resizing
         self.canvas = tk.Canvas(self)
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.scroll_frame = ttk.Frame(self.canvas)
@@ -259,7 +263,9 @@ class DyeingTab(ttk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        parent = self.scroll_frame  # Use scroll_frame as parent for content
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+
+        parent = self.scroll_frame
 
         top = ttk.Frame(parent)
         top.pack(fill="x", padx=6, pady=6)
@@ -268,11 +274,11 @@ class DyeingTab(ttk.Frame):
 
         pending_frame = ttk.LabelFrame(parent, text="Pending Batches")
         pending_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        cols = ("batch_ref", "lot_no", "type", "orig_kg", "orig_rolls", "returned_kg", "returned_rolls", "short_kg", "short_pct")
-        headings = ["Batch", "Lot", "Type", "Orig (kg)", "Orig (rolls)", "Returned (kg)", "Returned (rolls)", "Short (kg)", "Short (%)"]
-        widths = [80, 120, 80, 100, 100, 100, 100, 90, 90]
+        cols = ("batch_ref","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
+        headings = ["Batch","Lot","Type","Orig (kg)","Orig (rolls)","Returned (kg)","Returned (rolls)","Short (kg)","Short (%)"]
+        widths = [80,120,80,100,100,100,100,90,90]
         self.pending_tree = ttk.Treeview(pending_frame, columns=cols, show="headings", height=8)
-        for c, h, w in zip(cols, headings, widths):
+        for c,h,w in zip(cols, headings, widths):
             self.pending_tree.heading(c, text=h)
             self.pending_tree.column(c, width=w)
         self.pending_tree.pack(fill="both", expand=True)
@@ -280,10 +286,13 @@ class DyeingTab(ttk.Frame):
         completed_frame = ttk.LabelFrame(parent, text="Completed Batches")
         completed_frame.pack(fill="both", expand=True, padx=6, pady=6)
         self.completed_tree = ttk.Treeview(completed_frame, columns=cols, show="headings", height=8)
-        for c, h, w in zip(cols, headings, widths):
+        for c,h,w in zip(cols, headings, widths):
             self.completed_tree.heading(c, text=h)
             self.completed_tree.column(c, width=w)
         self.completed_tree.pack(fill="both", expand=True)
+
+    def on_canvas_configure(self, event):
+        self.canvas.itemconfig(self.canvas.find_withtag("all"), width=event.width)
 
     def reload_all(self):
         self.load_pending()
