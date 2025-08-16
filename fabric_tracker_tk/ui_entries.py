@@ -168,6 +168,25 @@ class EntriesFrame(ttk.Frame):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w)
         self.tree.bind("<Double-1>", self.on_purchase_double_click)
+        self.tree.bind("<Button-3>", self.show_purchase_context_menu)  # Right-click binding
+
+    def show_purchase_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if item:
+            self.tree.selection_set(item)
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Delete", command=lambda: self.delete_purchase_confirmed(int(item)))
+            menu.post(event.x_root, event.y_root)
+
+    def delete_purchase_confirmed(self, purchase_id):
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this purchase?"):
+            db.delete_purchase(purchase_id)
+            self.reload_entries()
+            if self.controller and hasattr(self.controller, "fabricators_frame"):
+                try:
+                    self.controller.fabricators_frame.build_tabs()
+                except Exception:
+                    pass
 
     # ---------------- Dyeing Outputs ----------------
     def build_dyeing_form(self, parent):
@@ -216,6 +235,20 @@ class EntriesFrame(ttk.Frame):
             self.dye_tree.heading(c, text=h)
             self.dye_tree.column(c, width=w)
         self.dye_tree.bind("<Double-1>", self.on_dyeing_double_click)
+        self.dye_tree.bind("<Button-3>", self.show_dyeing_context_menu)  # Right-click binding
+
+    def show_dyeing_context_menu(self, event):
+        item = self.dye_tree.identify_row(event.y)
+        if item:
+            self.dye_tree.selection_set(item)
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Delete", command=lambda: self.delete_dyeing_confirmed(int(item)))
+            menu.post(event.x_root, event.y_root)
+
+    def delete_dyeing_confirmed(self, dyeing_id):
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this dyeing output?"):
+            db.delete_dyeing_output(dyeing_id)
+            self.reload_dyeing_outputs()
 
     # ---------------- Lists / Refresh ----------------
     def refresh_lists(self):
@@ -253,12 +286,7 @@ class EntriesFrame(ttk.Frame):
             cur.execute("SELECT id FROM suppliers WHERE name=?", (name,))
             row = cur.fetchone()
             if not row:
-                # If your schema requires type, this will store as generic/NULL
-                try:
-                    cur.execute("INSERT INTO suppliers (name) VALUES (?)", (name,))
-                except Exception:
-                    # fallback with type as 'supplier'
-                    cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (name, "supplier"))
+                cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (name, "yarn_supplier"))
         conn.commit()
         conn.close()
 
@@ -267,15 +295,7 @@ class EntriesFrame(ttk.Frame):
         name = (name or "").strip()
         if not name:
             return
-        conn = db.get_connection()
-        cur = conn.cursor()
-        # Common table name is 'yarn_types' with column 'name'
-        cur.execute("SELECT name FROM yarn_types WHERE name=?", (name,))
-        row = cur.fetchone()
-        if not row:
-            cur.execute("INSERT INTO yarn_types (name) VALUES (?)", (name,))
-        conn.commit()
-        conn.close()
+        db.add_yarn_type(name)
 
     # ---------------- Purchases Functions ----------------
     def reload_entries(self):
@@ -287,8 +307,8 @@ class EntriesFrame(ttk.Frame):
         for row in cur.fetchall():
             display_date = db.db_to_ui_date(row["date"])
             self.tree.insert("", "end", iid=row["id"], values=(
-                display_date,row["batch_id"],row["lot_no"],row["supplier"],row["yarn_type"],
-                row["qty_kg"],row["qty_rolls"],row["price_per_unit"],row["delivered_to"]
+                display_date, row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"],
+                row["qty_kg"], row["qty_rolls"], row["price_per_unit"], row["delivered_to"]
             ))
         conn.close()
 
