@@ -3,7 +3,6 @@ import os
 import sys
 import shutil
 from datetime import datetime
-from contextlib import contextmanager
 
 APP_NAME = "FabricTracker"
 DB_NAME = "fabric_tracker.db"
@@ -21,17 +20,17 @@ DB_PATH = os.path.join(BASE_DIR, DB_NAME)
 
 # Backup directory in persistent location
 BACKUP_PATH = os.path.join(BASE_DIR, BACKUP_DIR)
+os.makedirs(BACKUP_PATH, exist_ok=True)
 
 # ----------------------------
 # Backup / Restore Utilities
 # ----------------------------
 def get_db_path():
-    """
-    Returns the path to the database file in a persistent location.
-    """
+    """Returns the path to the database file in a persistent location."""
     return DB_PATH
 
 def backup_db():
+    """Create a timestamped backup and prune old ones."""
     if not os.path.exists(BACKUP_PATH):
         os.makedirs(BACKUP_PATH)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -54,15 +53,17 @@ def restore_backup(path):
 # ----------------------------
 # Database Connection
 # ----------------------------
-@contextmanager
 def get_connection():
-    conn = sqlite3.connect(get_db_path(), timeout=10)  # Increased timeout to handle contention
+    """
+    Return a direct sqlite3 connection (works with both:
+      - conn = get_connection(); cur = conn.cursor()
+      - with get_connection() as conn:
+    )
+    """
+    conn = sqlite3.connect(get_db_path(), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
-    try:
-        yield conn
-    finally:
-        conn.close()
+    return conn
 
 # ----------------------------
 # DB Initialization / Migrations
@@ -192,9 +193,8 @@ def init_db():
 def db_to_ui_date(db_date: str) -> str:
     if not db_date:
         return ""
-    with get_connection() as conn:
-        dt = datetime.strptime(db_date, "%Y-%m-%d")
-        return dt.strftime("%d/%m/%Y")
+    dt = datetime.strptime(db_date, "%Y-%m-%d")
+    return dt.strftime("%d/%m/%Y")
 
 def ui_to_db_date(ui_date: str) -> str:
     if not ui_date:
@@ -296,7 +296,10 @@ def delete_master_by_name(name: str):
                 ("batches", "fabricator_id"),
                 ("dyeing_outputs", "dyeing_unit_id")
             ]:
-                cur.execute(f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1", (name if col in ("supplier", "delivered_to") else sid,))
+                cur.execute(
+                    f"SELECT 1 FROM {table} WHERE {col}=? LIMIT 1",
+                    (name if col in ("supplier", "delivered_to") else sid,)
+                )
                 if cur.fetchone():
                     return False
 
@@ -414,9 +417,12 @@ def create_lot(batch_id, lot_index, weight_kg=0):
             raise ValueError(f"Batch ID {batch_id} not found. Ensure the batch was created successfully.")
         batch_ref = row["batch_ref"]
         lot_no = f"{batch_ref}/{lot_index}"
-        cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)", (batch_id, lot_no, lot_index, weight_kg))
+        cur.execute(
+            "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)",
+            (batch_id, lot_no, lot_index, weight_kg)
+        )
         conn.commit()  # Commit each lot
-    return cur.lastrowid
+        return cur.lastrowid
 
 def get_lot_id_by_no(lot_no: str):
     if not lot_no or not lot_no.strip():
@@ -444,20 +450,25 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     with get_connection() as conn:
         cur = conn.cursor()
 
-        # Create batch and lot if they don't exist
+        # Create batch (and its first lot) if they don't exist
         if not batch_id:
             fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 create_batch(batch_id, fabricator_id, "Default Product", 1)
-                lot_no = f"{batch_id}/1"
-                create_lot(get_batch_id_by_ref(batch_id), 1, qty_kg)
+                lot_no = f"{batch_id}/1"  # lot already created by create_batch()
 
         cur.execute("""
             INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes))
         purchase_id = cur.lastrowid
+
+        # Update lot weight if that lot exists
+        lot_id = get_lot_id_by_no(lot_no) if lot_no else None
+        if lot_id:
+            cur.execute("UPDATE lots SET weight_kg=? WHERE id=?", (qty_kg, lot_id))
+
         conn.commit()
     return purchase_id
 
