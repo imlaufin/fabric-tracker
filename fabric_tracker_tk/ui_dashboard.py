@@ -1,4 +1,3 @@
-# ui_dashboard.py
 import tkinter as tk
 from tkinter import ttk
 from fabric_tracker_tk import db
@@ -57,33 +56,32 @@ class DashboardFrame(ttk.Frame):
         except Exception:
             from_db = to_db = None
 
-        conn = db.get_connection()
-        cur = conn.cursor()
-        sql = "SELECT date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to FROM purchases"
-        params = ()
-        if from_db and to_db:
-            sql += " WHERE date BETWEEN ? AND ?"
-            params = (from_db, to_db)
-        sql += " ORDER BY date DESC"
-        cur.execute(sql, params)
-        rows = cur.fetchall()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            sql = "SELECT date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, delivered_to FROM purchases"
+            params = ()
+            if from_db and to_db:
+                sql += " WHERE date BETWEEN ? AND ?"
+                params = (from_db, to_db)
+            sql += " ORDER BY date DESC"
+            cur.execute(sql, params)
+            rows = cur.fetchall()
 
-        total_purchases = 0
-        total_kg = 0
-        batch_set = set()
+            total_purchases = 0
+            total_kg = 0
+            batch_set = set()
 
-        for r in rows:
-            display_date = r["date"]
-            try:
-                display_date = db.db_to_ui_date(r["date"])
-            except:
-                pass
-            self.tree.insert("", "end", values=(display_date, r["batch_id"], r["lot_no"], r["supplier"], r["yarn_type"], r["qty_kg"], r["qty_rolls"], r["delivered_to"]))
-            total_purchases += 1
-            total_kg += r["qty_kg"] or 0
-            batch_set.add(r["batch_id"])
+            for r in rows:
+                display_date = r["date"]
+                try:
+                    display_date = db.db_to_ui_date(r["date"])
+                except:
+                    pass
+                self.tree.insert("", "end", values=(display_date, r["batch_id"], r["lot_no"], r["supplier"], r["yarn_type"], r["qty_kg"], r["qty_rolls"], r["delivered_to"]))
+                total_purchases += 1
+                total_kg += r["qty_kg"] or 0
+                batch_set.add(r["batch_id"])
 
-        self.total_purchases_label.config(text=f"Total Purchases: {total_purchases}")
-        self.total_yarn_kg_label.config(text=f"Total Yarn (kg): {total_kg}")
-        self.total_batches_label.config(text=f"Total Batches: {len(batch_set)}")
-        conn.close()
+            self.total_purchases_label.config(text=f"Total Purchases: {total_purchases}")
+            self.total_yarn_kg_label.config(text=f"Total Yarn (kg): {total_kg}")
+            self.total_batches_label.config(text=f"Total Batches: {len(batch_set)}")
