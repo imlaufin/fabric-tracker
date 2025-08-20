@@ -129,6 +129,7 @@ def init_db():
         batch_id INTEGER,
         lot_no TEXT UNIQUE,
         lot_index INTEGER,
+        weight_kg REAL,  -- Added to track weight at lot level
         status TEXT DEFAULT 'Ordered',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
@@ -411,7 +412,7 @@ def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composit
     conn.close()
     return bid
 
-def create_lot(batch_id, lot_index):
+def create_lot(batch_id, lot_index, weight_kg=0):
     conn = get_connection()
     cur = conn.cursor()
     row = cur.execute("SELECT batch_ref FROM batches WHERE id=?", (batch_id,)).fetchone()
@@ -419,7 +420,7 @@ def create_lot(batch_id, lot_index):
         raise ValueError(f"Batch ID {batch_id} not found. Ensure the batch was created successfully.")
     batch_ref = row["batch_ref"]
     lot_no = f"{batch_ref}/{lot_index}"
-    cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index) VALUES (?, ?, ?)", (batch_id, lot_no, lot_index))
+    cur.execute("INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)", (batch_id, lot_no, lot_index, weight_kg))
     conn.commit()  # Commit each lot
     conn.close()
     return cur.lastrowid
@@ -451,16 +452,21 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
     cur = conn.cursor()
+
+    # Create batch and lot if they don't exist
+    if not batch_id:
+        fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
+        if fabricator_id:
+            batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            create_batch(batch_id, fabricator_id, "Default Product", 1)
+            lot_no = f"{batch_id}/1"
+            create_lot(get_batch_id_by_ref(batch_id), 1, qty_kg)
+
     cur.execute("""
         INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes))
     purchase_id = cur.lastrowid
-    # Create rolls
-    lot_id = get_lot_id_by_no(lot_no)
-    if lot_id:
-        for _ in range(qty_rolls):
-            cur.execute("INSERT INTO rolls (lot_id, weight_kg) VALUES (?, ?)", (lot_id, qty_kg / qty_rolls if qty_rolls > 0 else 0))
     conn.commit()
     conn.close()
     return purchase_id
@@ -476,12 +482,10 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
         SET date=?, batch_id=?, lot_no=?, supplier=?, yarn_type=?, qty_kg=?, qty_rolls=?, price_per_unit=?, delivered_to=?, notes=?
         WHERE id=?
     """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, purchase_id))
-    # Update rolls
+    # Update lot weight
     lot_id = get_lot_id_by_no(lot_no)
     if lot_id:
-        cur.execute("DELETE FROM rolls WHERE lot_id=?", (lot_id,))
-        for _ in range(qty_rolls):
-            cur.execute("INSERT INTO rolls (lot_id, weight_kg) VALUES (?, ?)", (lot_id, qty_kg / qty_rolls if qty_rolls > 0 else 0))
+        cur.execute("UPDATE lots SET weight_kg=? WHERE id=?", (qty_kg, lot_id))
     conn.commit()
     conn.close()
 
@@ -494,7 +498,7 @@ def delete_purchase(purchase_id: int):
         lot_no = row["lot_no"]
         lot_id = get_lot_id_by_no(lot_no)
         if lot_id:
-            cur.execute("DELETE FROM rolls WHERE lot_id=?", (lot_id,))
+            cur.execute("DELETE FROM lots WHERE id=?", (lot_id,))
         cur.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
     conn.commit()
     conn.close()
@@ -522,31 +526,16 @@ def delete_dyeing_output(dyeing_id: int):
     conn.commit()
     conn.close()
 
-# ----------------------------
-# New Tables and Functions
-# ----------------------------
-def init_rolls_table():
+# Helper function to get batch_id by reference
+def get_batch_id_by_ref(batch_ref):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS rolls (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        lot_id INTEGER,
-        weight_kg REAL DEFAULT 25,
-        yarn_composition TEXT,
-        FOREIGN KEY(lot_id) REFERENCES lots(id) ON DELETE CASCADE
-    )
-    """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_rolls_lot_id ON rolls(lot_id)")
-    conn.commit()
+    row = conn.execute("SELECT id FROM batches WHERE batch_ref=? LIMIT 1", (batch_ref,)).fetchone()
     conn.close()
+    return row["id"] if row else None
 
-def list_rolls(lot_id):
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM rolls WHERE lot_id=? ORDER BY id", (lot_id,)).fetchall()
-    conn.close()
-    return rows
-
+# ----------------------------
+# New Functions
+# ----------------------------
 def update_batch_status(batch_id, status):
     if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
         raise ValueError(f"Invalid status: {status}")
@@ -585,7 +574,9 @@ def calculate_net_price(batch_id):
     conn.close()
     return net_price
 
-# Note: Call init_rolls_table() manually if the rolls table is needed after initial setup
-# init_rolls_table()  # Removed from global scope
+# ----------------------------
+# Initialization on Import
+# ----------------------------
+init_db()
 
 # End of file
