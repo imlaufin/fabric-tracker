@@ -38,8 +38,25 @@ class FabricTrackerApp(tk.Tk):
         # Called when Masters change
         try:
             self.fabricators_frame.build_tabs()
+            self.update_statuses()  # Update statuses across tabs
         except Exception as e:
             print("Error reloading fabricators:", e)
+
+    def update_statuses(self):
+        # Update batch/lot statuses based on purchases/dyeing
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("UPDATE batches SET status='Knitted' WHERE id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
+        cur.execute("UPDATE lots SET status='Knitted' WHERE batch_id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
+        cur.execute("UPDATE batches SET status='Dyed' WHERE id IN (SELECT batch_id FROM dyeing_outputs)")
+        cur.execute("UPDATE lots SET status='Dyed' WHERE id IN (SELECT lot_id FROM dyeing_outputs)")
+        cur.execute("UPDATE batches SET status='Received' WHERE id IN (SELECT batch_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
+        cur.execute("UPDATE lots SET status='Received' WHERE id IN (SELECT lot_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
+        conn.commit()
+        conn.close()
+        self.entries_frame.reload_entries()
+        self.fabricators_frame.build_tabs()
+        self.dashboard_frame.reload_all()
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
         # Proxy to fabricators frame
@@ -48,4 +65,5 @@ class FabricTrackerApp(tk.Tk):
 
 if __name__ == "__main__":
     app = FabricTrackerApp()
+    app.protocol("WM_DELETE_WINDOW", lambda: [db.backup_db(), app.destroy()])  # Auto-backup on close
     app.mainloop()
