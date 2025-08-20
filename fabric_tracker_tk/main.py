@@ -13,7 +13,13 @@ class FabricTrackerApp(tk.Tk):
         super().__init__()
         self.title("Fabric Tracker (All-in-One)")
         self.geometry("1200x800")
-        db.init_db()  # Initialize database with persistent path
+        try:
+            db.init_db()  # Initialize database with persistent path
+            db.init_rolls_table()  # Initialize rolls table
+        except Exception as e:
+            print(f"Database initialization failed: {e}", file=sys.stderr)
+            self.destroy()
+            return
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
@@ -64,6 +70,7 @@ class FabricTrackerApp(tk.Tk):
             self.fabricators_frame.open_dyeing_tab_for_batch(dyeer_name, batch_ref)
 
 if __name__ == "__main__":
+    import sys
     app = FabricTrackerApp()
     app.protocol("WM_DELETE_WINDOW", lambda: [db.backup_db(), app.destroy()])  # Auto-backup on close
     app.mainloop()
