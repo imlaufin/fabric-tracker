@@ -118,6 +118,7 @@ def init_db():
         product_name TEXT,
         expected_lots INTEGER DEFAULT 0,
         composition TEXT,
+        status TEXT DEFAULT 'Ordered',  # Added for stages
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(fabricator_id) REFERENCES suppliers(id)
     )
@@ -128,6 +129,7 @@ def init_db():
         batch_id INTEGER,
         lot_no TEXT UNIQUE,
         lot_index INTEGER,
+        status TEXT DEFAULT 'Ordered',  # Added for stages
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
@@ -448,29 +450,52 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
-    conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes))
+    purchase_id = cur.lastrowid
+    # Create rolls
+    lot_id = get_lot_id_by_no(lot_no)
+    if lot_id:
+        for _ in range(qty_rolls):
+            cur.execute("INSERT INTO rolls (lot_id, weight_kg) VALUES (?, ?)", (lot_id, qty_kg / qty_rolls if qty_rolls > 0 else 0))
     conn.commit()
     conn.close()
+    return purchase_id
 
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
                   price_per_unit, delivered_to, notes=""):
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     conn = get_connection()
-    conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         UPDATE purchases
         SET date=?, batch_id=?, lot_no=?, supplier=?, yarn_type=?, qty_kg=?, qty_rolls=?, price_per_unit=?, delivered_to=?, notes=?
         WHERE id=?
     """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, purchase_id))
+    # Update rolls
+    lot_id = get_lot_id_by_no(lot_no)
+    if lot_id:
+        cur.execute("DELETE FROM rolls WHERE lot_id=?", (lot_id,))
+        for _ in range(qty_rolls):
+            cur.execute("INSERT INTO rolls (lot_id, weight_kg) VALUES (?, ?)", (lot_id, qty_kg / qty_rolls if qty_rolls > 0 else 0))
     conn.commit()
     conn.close()
 
 def delete_purchase(purchase_id: int):
     conn = get_connection()
-    conn.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
+    cur = conn.cursor()
+    cur.execute("SELECT lot_no FROM purchases WHERE id=?", (purchase_id,))
+    row = cur.fetchone()
+    if row:
+        lot_no = row["lot_no"]
+        lot_id = get_lot_id_by_no(lot_no)
+        if lot_id:
+            cur.execute("DELETE FROM rolls WHERE lot_id=?", (lot_id,))
+        cur.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
     conn.commit()
     conn.close()
 
@@ -496,3 +521,74 @@ def delete_dyeing_output(dyeing_id: int):
     conn.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
     conn.commit()
     conn.close()
+
+# ----------------------------
+# New Tables and Functions
+# ----------------------------
+def init_rolls_table():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS rolls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lot_id INTEGER,
+        weight_kg REAL DEFAULT 25,
+        yarn_composition TEXT,  # e.g., 'cotton:70,poly:30'
+        FOREIGN KEY(lot_id) REFERENCES lots(id) ON DELETE CASCADE
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_rolls_lot_id ON rolls(lot_id)")
+    conn.commit()
+    conn.close()
+
+def list_rolls(lot_id):
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM rolls WHERE lot_id=? ORDER BY id", (lot_id,)).fetchall()
+    conn.close()
+    return rows
+
+def update_batch_status(batch_id, status):
+    if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
+        raise ValueError(f"Invalid status: {status}")
+    conn = get_connection()
+    conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
+    conn.commit()
+    conn.close()
+
+def update_lot_status(lot_id, status):
+    if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
+        raise ValueError(f"Invalid status: {status}")
+    conn = get_connection()
+    conn.execute("UPDATE lots SET status=? WHERE id=?", (status, lot_id))
+    conn.commit()
+    conn.close()
+
+def get_batch_status(batch_id):
+    conn = get_connection()
+    row = conn.execute("SELECT status FROM batches WHERE id=? LIMIT 1", (batch_id,)).fetchone()
+    conn.close()
+    return row["status"] if row else None
+
+def get_lot_status(lot_id):
+    conn = get_connection()
+    row = conn.execute("SELECT status FROM lots WHERE id=? LIMIT 1", (lot_id,)).fetchone()
+    conn.close()
+    return row["status"] if row else None
+
+def calculate_net_price(batch_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT SUM(price_per_unit * qty_kg) FROM purchases WHERE batch_id=?", (batch_id,))
+    yarn_cost = cur.fetchone()[0] or 0
+    # Placeholder for knitting/dyeing fees (extend with new table if needed)
+    net_price = yarn_cost  # Add fees later
+    conn.close()
+    return net_price
+
+# ----------------------------
+# Initialization on Import
+# ----------------------------
+init_db()
+init_rolls_table()
+
+# End of file
