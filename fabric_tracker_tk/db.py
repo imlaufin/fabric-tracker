@@ -118,7 +118,7 @@ def init_db():
         product_name TEXT,
         expected_lots INTEGER DEFAULT 0,
         composition TEXT,
-        status TEXT DEFAULT 'Ordered',  # Added for stages
+        status TEXT DEFAULT 'Ordered',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(fabricator_id) REFERENCES suppliers(id)
     )
@@ -129,7 +129,7 @@ def init_db():
         batch_id INTEGER,
         lot_no TEXT UNIQUE,
         lot_index INTEGER,
-        status TEXT DEFAULT 'Ordered',  # Added for stages
+        status TEXT DEFAULT 'Ordered',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
     )
