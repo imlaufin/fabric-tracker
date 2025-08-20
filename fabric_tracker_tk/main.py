@@ -1,3 +1,4 @@
+import sys
 import tkinter as tk
 from tkinter import ttk
 from fabric_tracker_tk import db
@@ -7,6 +8,7 @@ from fabric_tracker_tk.ui_masters import MastersFrame
 from fabric_tracker_tk.ui_fabricators import FabricatorsFrame
 from fabric_tracker_tk.reports import ReportsFrame
 from fabric_tracker_tk.backup_restore import BackupRestoreFrame  # import the backup/restore UI
+
 
 class FabricTrackerApp(tk.Tk):
     def __init__(self):
@@ -49,16 +51,15 @@ class FabricTrackerApp(tk.Tk):
 
     def update_statuses(self):
         # Update batch/lot statuses based on purchases/dyeing
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("UPDATE batches SET status='Knitted' WHERE id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
-        cur.execute("UPDATE lots SET status='Knitted' WHERE batch_id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
-        cur.execute("UPDATE batches SET status='Dyed' WHERE id IN (SELECT batch_id FROM dyeing_outputs)")
-        cur.execute("UPDATE lots SET status='Dyed' WHERE id IN (SELECT lot_id FROM dyeing_outputs)")
-        cur.execute("UPDATE batches SET status='Received' WHERE id IN (SELECT batch_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
-        cur.execute("UPDATE lots SET status='Received' WHERE id IN (SELECT lot_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
-        conn.commit()
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE batches SET status='Knitted' WHERE id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
+            cur.execute("UPDATE lots SET status='Knitted' WHERE batch_id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
+            cur.execute("UPDATE batches SET status='Dyed' WHERE id IN (SELECT batch_id FROM dyeing_outputs)")
+            cur.execute("UPDATE lots SET status='Dyed' WHERE id IN (SELECT lot_id FROM dyeing_outputs)")
+            cur.execute("UPDATE batches SET status='Received' WHERE id IN (SELECT batch_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
+            cur.execute("UPDATE lots SET status='Received' WHERE id IN (SELECT lot_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
+            conn.commit()
         self.entries_frame.reload_entries()
         self.fabricators_frame.build_tabs()
         self.dashboard_frame.reload_all()
@@ -68,8 +69,8 @@ class FabricTrackerApp(tk.Tk):
         if hasattr(self.fabricators_frame, "open_dyeing_tab_for_batch"):
             self.fabricators_frame.open_dyeing_tab_for_batch(dyeer_name, batch_ref)
 
+
 if __name__ == "__main__":
-    import sys
     app = FabricTrackerApp()
     app.protocol("WM_DELETE_WINDOW", lambda: [db.backup_db(), app.destroy()])  # Auto-backup on close
     app.mainloop()
