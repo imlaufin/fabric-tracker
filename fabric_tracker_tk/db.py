@@ -129,7 +129,7 @@ def init_db():
         batch_id INTEGER,
         lot_no TEXT UNIQUE,
         lot_index INTEGER,
-        weight_kg REAL,  -- Added to track weight at lot level
+        weight_kg REAL,
         status TEXT DEFAULT 'Ordered',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY(batch_id) REFERENCES batches(id)
@@ -148,6 +148,14 @@ def init_db():
         FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id)
     )
     """)
+
+    # Migration: Add missing columns to lots if they don't exist
+    cur.execute("PRAGMA table_info(lots)")
+    columns = [row["name"] for row in cur.fetchall()]
+    if "weight_kg" not in columns:
+        cur.execute("ALTER TABLE lots ADD COLUMN weight_kg REAL")
+    if "status" not in columns:
+        cur.execute("ALTER TABLE lots ADD COLUMN status TEXT DEFAULT 'Ordered'")
 
     # Helpful indexes
     cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
