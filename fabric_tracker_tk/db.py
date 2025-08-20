@@ -533,7 +533,7 @@ def init_rolls_table():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         lot_id INTEGER,
         weight_kg REAL DEFAULT 25,
-        yarn_composition TEXT,  # e.g., 'cotton:70,poly:30'
+        yarn_composition TEXT,
         FOREIGN KEY(lot_id) REFERENCES lots(id) ON DELETE CASCADE
     )
     """)
