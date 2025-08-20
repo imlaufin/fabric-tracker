@@ -15,7 +15,6 @@ class FabricTrackerApp(tk.Tk):
         self.geometry("1200x800")
         try:
             db.init_db()  # Initialize database with persistent path
-            db.init_rolls_table()  # Initialize rolls table
         except Exception as e:
             print(f"Database initialization failed: {e}", file=sys.stderr)
             self.destroy()
