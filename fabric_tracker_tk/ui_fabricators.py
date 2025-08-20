@@ -110,47 +110,44 @@ class KnittingTab(ttk.Frame):
     def load_inward_transactions(self):
         for r in self.tx_tree.get_children():
             self.tx_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT date, supplier, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
-            FROM purchases
-            WHERE delivered_to=? ORDER BY date DESC
-        """, (self.fabricator["name"],))
-        for row in cur.fetchall():
-            display_date = db.db_to_ui_date(row["date"])
-            self.tx_tree.insert("", "end", values=(display_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT date, supplier, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
+                FROM purchases
+                WHERE delivered_to=? ORDER BY date DESC
+            """, (self.fabricator["name"],))
+            for row in cur.fetchall():
+                display_date = db.db_to_ui_date(row["date"])
+                self.tx_tree.insert("", "end", values=(display_date, row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
 
     def load_outward_transactions(self):
         for r in self.out_tx_tree.get_children():
             self.out_tx_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT date, delivered_to, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
-            FROM purchases
-            WHERE supplier=? AND delivered_to != ?
-            ORDER BY date DESC
-        """, (self.fabricator["name"], self.fabricator["name"]))
-        for row in cur.fetchall():
-            display_date = db.db_to_ui_date(row["date"])
-            self.out_tx_tree.insert("", "end", values=(display_date, row["delivered_to"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT date, delivered_to, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
+                FROM purchases
+                WHERE supplier=? AND delivered_to != ?
+                ORDER BY date DESC
+            """, (self.fabricator["name"], self.fabricator["name"]))
+            for row in cur.fetchall():
+                display_date = db.db_to_ui_date(row["date"])
+                self.out_tx_tree.insert("", "end", values=(display_date, row["delivered_to"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["batch_id"], row["lot_no"]))
 
     def load_batches(self):
         for r in self.batch_tree.get_children():
             self.batch_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (self.fabricator["id"],))
-        for b in cur.fetchall():
-            cur.execute("SELECT COUNT(DISTINCT lot_no) as cnt FROM purchases WHERE batch_id=? AND delivered_to=?", (b["batch_ref"], self.fabricator["name"]))
-            delivered = cur.fetchone()["cnt"] or 0
-            expected = b["expected_lots"] or 0
-            pending = max(0, expected - delivered)
-            self.batch_tree.insert("", "end", values=(b["batch_ref"], b["product_name"], expected, delivered, pending))
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (self.fabricator["id"],))
+            for b in cur.fetchall():
+                cur.execute("SELECT COUNT(DISTINCT lot_no) as cnt FROM purchases WHERE batch_id=? AND delivered_to=?", (b["batch_ref"], self.fabricator["name"]))
+                delivered = cur.fetchone()["cnt"] or 0
+                expected = b["expected_lots"] or 0
+                pending = max(0, expected - delivered)
+                self.batch_tree.insert("", "end", values=(b["batch_ref"], b["product_name"], expected, delivered, pending))
 
     def on_batch_double(self, event):
         sel = self.batch_tree.selection()
@@ -158,11 +155,10 @@ class KnittingTab(ttk.Frame):
             return
         vals = self.batch_tree.item(sel[0])["values"]
         batch_ref = vals[0]
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT delivered_to FROM purchases WHERE batch_id=? AND delivered_to IS NOT NULL AND delivered_to != '' LIMIT 1", (batch_ref,))
-        row = cur.fetchone()
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT delivered_to FROM purchases WHERE batch_id=? AND delivered_to IS NOT NULL AND delivered_to != '' LIMIT 1", (batch_ref,))
+            row = cur.fetchone()
         if row and self.controller and hasattr(self.controller, "open_dyeing_tab_for_batch"):
             self.controller.open_dyeing_tab_for_batch(row["delivered_to"], batch_ref)
 
@@ -192,14 +188,12 @@ class KnittingTab(ttk.Frame):
                 return
             
             # Check for duplicate batch ID
-            conn = db.get_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) as cnt FROM batches WHERE batch_ref=?", (br,))
-            if cur.fetchone()["cnt"] > 0:
-                messagebox.showerror("Duplicate", f"Batch ID '{br}' already exists.")
-                conn.close()
-                return
-            conn.close()
+            with get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) as cnt FROM batches WHERE batch_ref=?", (br,))
+                if cur.fetchone()["cnt"] > 0:
+                    messagebox.showerror("Duplicate", f"Batch ID '{br}' already exists.")
+                    return
 
             db.create_batch(br, self.fabricator["id"], pname_val, expected, comp_val)
             self.load_batches()
@@ -210,34 +204,33 @@ class KnittingTab(ttk.Frame):
     def load_stock_summary(self):
         for r in self.summary_tree.get_children():
             self.summary_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        # Inwards
-        cur.execute("""
-            SELECT yarn_type, SUM(qty_kg) as kg_in
-            FROM purchases
-            WHERE delivered_to=?
-            GROUP BY yarn_type
-        """, (self.fabricator["name"],))
-        inwards = {row["yarn_type"]: row["kg_in"] or 0 for row in cur.fetchall()}
-        
-        # Outwards (transfers sent out)
-        cur.execute("""
-            SELECT yarn_type, SUM(qty_kg) as kg_out
-            FROM purchases
-            WHERE supplier=? AND delivered_to != ?
-            GROUP BY yarn_type
-        """, (self.fabricator["name"], self.fabricator["name"]))
-        outwards = {row["yarn_type"]: row["kg_out"] or 0 for row in cur.fetchall()}
-        
-        # Net balance per yarn type (Kg only, clamp to 0 if negative)
-        yarn_types = set(inwards.keys()).union(outwards.keys())
-        for yarn_type in sorted(yarn_types):
-            kg_in = inwards.get(yarn_type, 0)
-            kg_out = outwards.get(yarn_type, 0)
-            net_kg = max(0, kg_in - kg_out)  # Clamp to 0 to avoid negative
-            self.summary_tree.insert("", "end", values=(yarn_type, net_kg))
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            # Inwards
+            cur.execute("""
+                SELECT yarn_type, SUM(qty_kg) as kg_in
+                FROM purchases
+                WHERE delivered_to=?
+                GROUP BY yarn_type
+            """, (self.fabricator["name"],))
+            inwards = {row["yarn_type"]: row["kg_in"] or 0 for row in cur.fetchall()}
+            
+            # Outwards (transfers sent out)
+            cur.execute("""
+                SELECT yarn_type, SUM(qty_kg) as kg_out
+                FROM purchases
+                WHERE supplier=? AND delivered_to != ?
+                GROUP BY yarn_type
+            """, (self.fabricator["name"], self.fabricator["name"]))
+            outwards = {row["yarn_type"]: row["kg_out"] or 0 for row in cur.fetchall()}
+            
+            # Net balance per yarn type (Kg only, clamp to 0 if negative)
+            yarn_types = set(inwards.keys()).union(outwards.keys())
+            for yarn_type in sorted(yarn_types):
+                kg_in = inwards.get(yarn_type, 0)
+                kg_out = outwards.get(yarn_type, 0)
+                net_kg = max(0, kg_in - kg_out)  # Clamp to 0 to avoid negative
+                self.summary_tree.insert("", "end", values=(yarn_type, net_kg))
 
 class DyeingTab(ttk.Frame):
     def __init__(self, parent, fabricator_row, controller=None):
@@ -274,7 +267,7 @@ class DyeingTab(ttk.Frame):
 
         pending_frame = ttk.LabelFrame(parent, text="Pending Batches")
         pending_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        cols = ("batch_ref","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
+        cols = ("batch_id","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
         headings = ["Batch","Lot","Type","Orig (kg)","Orig (rolls)","Returned (kg)","Returned (rolls)","Short (kg)","Short (%)"]
         widths = [80,120,80,100,100,100,100,90,90]
         self.pending_tree = ttk.Treeview(pending_frame, columns=cols, show="headings", height=8)
@@ -301,71 +294,70 @@ class DyeingTab(ttk.Frame):
     def load_pending(self):
         for r in self.pending_tree.get_children():
             self.pending_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
-            FROM purchases p
-            WHERE p.delivered_to=?
-            GROUP BY p.batch_id, p.lot_no, p.yarn_type
-        """, (self.fabricator["name"],))
-        lots = cur.fetchall()
-        for lot in lots:
-            batch_ref = lot["batch_id"]
-            lot_no = lot["lot_no"]
-            yarn_type = lot["yarn_type"]
-            orig_kg = lot["orig_kg"] or 0
-            orig_rolls = lot["orig_rolls"] or 0
+        with get_connection() as conn:
+            cur = conn.cursor()
             cur.execute("""
-                SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
-                FROM dyeing_outputs d
-                JOIN lots l ON d.lot_id = l.id
-                WHERE l.lot_no=? AND d.dyeing_unit_id=?
-            """, (lot_no, self.fabricator["id"]))
-            out = cur.fetchone()
-            rkg = out["rkg"] or 0
-            rrolls = out["rrolls"] or 0
-            if rkg < DYEING_COMPLETION_THRESHOLD * orig_kg:
-                short_kg = orig_kg - rkg
-                short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
-                tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
-                self.pending_tree.insert("", "end", values=(batch_ref, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg, 2), round(short_pct, 2)), tags=(tag,))
-        self.pending_tree.tag_configure("short", background="#ffcccc")
-        conn.close()
+                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+                FROM purchases p
+                WHERE p.delivered_to=?
+                GROUP BY p.batch_id, p.lot_no, p.yarn_type
+            """, (self.fabricator["name"],))
+            lots = cur.fetchall()
+            for lot in lots:
+                batch_id = lot["batch_id"]
+                lot_no = lot["lot_no"]
+                yarn_type = lot["yarn_type"]
+                orig_kg = lot["orig_kg"] or 0
+                orig_rolls = lot["orig_rolls"] or 0
+                cur.execute("""
+                    SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
+                    FROM dyeing_outputs d
+                    JOIN lots l ON d.lot_id = l.id
+                    WHERE l.lot_no=? AND d.dyeing_unit_id=?
+                """, (lot_no, self.fabricator["id"]))
+                out = cur.fetchone()
+                rkg = out["rkg"] or 0
+                rrolls = out["rrolls"] or 0
+                if rkg < DYEING_COMPLETION_THRESHOLD * orig_kg:
+                    short_kg = orig_kg - rkg
+                    short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
+                    tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
+                    self.pending_tree.insert("", "end", values=(batch_id, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg, 2), round(short_pct, 2)), tags=(tag,))
+            self.pending_tree.tag_configure("short", background="#ffcccc")
 
     def load_completed(self):
         for r in self.completed_tree.get_children():
             self.completed_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
-            FROM purchases p
-            WHERE p.delivered_to=?
-            GROUP BY p.batch_id, p.lot_no, p.yarn_type
-        """, (self.fabricator["name"],))
-        lots = cur.fetchall()
-        for lot in lots:
-            batch_ref = lot["batch_id"]
-            lot_no = lot["lot_no"]
-            orig_kg = lot["orig_kg"] or 0
-            orig_rolls = lot["orig_rolls"] or 0
+        with get_connection() as conn:
+            cur = conn.cursor()
             cur.execute("""
-                SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
-                FROM dyeing_outputs d
-                JOIN lots l ON d.lot_id = l.id
-                WHERE l.lot_no=? AND d.dyeing_unit_id=?
-            """, (lot_no, self.fabricator["id"]))
-            out = cur.fetchone()
-            rkg = out["rkg"] or 0
-            rrolls = out["rrolls"] or 0
-            if rkg >= DYEING_COMPLETION_THRESHOLD * orig_kg:
-                short_kg = orig_kg - rkg
-                short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
-                tag = "short" if short_pct > DYEING_SHORTAGE_HIGHLIGHT else ""
-                self.completed_tree.insert("", "end", values=(batch_ref, lot_no, lot["yarn_type"], orig_kg, orig_rolls, rkg, rrolls, round(short_kg, 2), round(short_pct, 2)), tags=(tag,))
-        self.completed_tree.tag_configure("short", background="#ffcccc")
-        conn.close()
+                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+                FROM purchases p
+                WHERE p.delivered_to=?
+                GROUP BY p.batch_id, p.lot_no, p.yarn_type
+            """, (self.fabricator["name"],))
+            lots = cur.fetchall()
+            for lot in lots:
+                batch_id = lot["batch_id"]
+                lot_no = lot["lot_no"]
+                yarn_type = lot["yarn_type"]
+                orig_kg = lot["orig_kg"] or 0
+                orig_rolls = lot["orig_rolls"] or 0
+                cur.execute("""
+                    SELECT SUM(d.returned_qty_kg) as rkg, SUM(d.returned_qty_rolls) as rrolls
+                    FROM dyeing_outputs d
+                    JOIN lots l ON d.lot_id = l.id
+                    WHERE l.lot_no=? AND d.dyeing_unit_id=?
+                """, (lot_no, self.fabricator["id"]))
+                out = cur.fetchone()
+                rkg = out["rkg"] or 0
+                rrolls = out["rrolls"] or 0
+                if rkg >= DYEING_COMPLETION_THRESHOLD * orig_kg:
+                    short_kg = orig_kg - rkg
+                    short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
+                    tag = "short" if short_pct > DYEING_SHORTAGE_HIGHLIGHT else ""
+                    self.completed_tree.insert("", "end", values=(batch_id, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg, 2), round(short_pct, 2)), tags=(tag,))
+            self.completed_tree.tag_configure("short", background="#ffcccc")
 
 class FabricatorsFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
