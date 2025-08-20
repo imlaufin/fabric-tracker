@@ -585,10 +585,7 @@ def calculate_net_price(batch_id):
     conn.close()
     return net_price
 
-# ----------------------------
-# Initialization on Import
-# ----------------------------
-init_db()
-init_rolls_table()
+# Note: Call init_rolls_table() manually if the rolls table is needed after initial setup
+# init_rolls_table()  # Removed from global scope
 
 # End of file
