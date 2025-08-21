@@ -531,18 +531,19 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
             resolved_lot_id = int(str(lot_id).strip())
         except Exception:
             resolved_lot_id = get_lot_id_by_no(lot_id)
+    if not resolved_lot_id:
+        raise ValueError(f"Lot ID or Lot No '{lot_id}' not found.")
     with get_connection() as conn:
-        conn.execute("""
+        cur = conn.cursor()
+        cur.execute("""
             INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
         # Update lot status based on completion
-        if returned_qty_kg >= 0.9 * (conn.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["weight_kg"] or 0):
-            cur = conn.cursor()
+        weight_kg = cur.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["weight_kg"] or 0
+        if returned_qty_kg >= 0.9 * weight_kg:
             cur.execute("UPDATE lots SET status='Received' WHERE id=?", (resolved_lot_id,))
-            # Update batch status if all lots are received
-            cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,))
-            batch_id = cur.fetchone()["batch_id"]
+            batch_id = cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["batch_id"]
             cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
             min_status = cur.fetchone()["min_status"]
             if min_status == "Received":
