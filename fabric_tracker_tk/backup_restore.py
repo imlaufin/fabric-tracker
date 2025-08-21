@@ -12,7 +12,11 @@ class BackupRestoreFrame(ttk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent)
         self.controller = controller
-        os.makedirs(BACKUP_DIR, exist_ok=True)
+        try:
+            os.makedirs(BACKUP_DIR, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create backup directory: {e}")
+            return
         self.build_ui()
         self.refresh_backup_list()
 
@@ -43,11 +47,16 @@ class BackupRestoreFrame(ttk.Frame):
     def refresh_backup_list(self):
         for r in self.backup_list.get_children():
             self.backup_list.delete(r)
-        backups = sorted(os.listdir(BACKUP_DIR), reverse=True)
-        for f in backups:
-            path = os.path.join(BACKUP_DIR, f)
-            created = datetime.fromtimestamp(os.path.getctime(path)).strftime("%Y-%m-%d %H:%M:%S")
-            self.backup_list.insert("", "end", values=(f, created))
+        try:
+            backups = sorted(os.listdir(BACKUP_DIR), reverse=True)
+            for f in backups:
+                path = os.path.join(BACKUP_DIR, f)
+                created = datetime.fromtimestamp(os.path.getctime(path)).strftime("%Y-%m-%d %H:%M:%S")
+                self.backup_list.insert("", "end", values=(f, created))
+        except FileNotFoundError:
+            self.status_label.config(text="Backup directory not found.", foreground="red")
+        except Exception as e:
+            self.status_label.config(text=f"Failed to refresh backup list: {e}", foreground="red")
 
     # Automatic backup inside backups/
     def backup_db_auto(self):
@@ -55,7 +64,8 @@ class BackupRestoreFrame(ttk.Frame):
             db_path = db.get_db_path()
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             dest = os.path.join(BACKUP_DIR, f"fabric_backup_{ts}.db")
-            shutil.copy2(db_path, dest)
+            with open(db_path, "rb") as src, open(dest, "wb") as dst:
+                shutil.copyfileobj(src, dst)
 
             # Remove older backups if exceeding MAX_BACKUPS
             backups = sorted(os.listdir(BACKUP_DIR))
@@ -79,7 +89,8 @@ class BackupRestoreFrame(ttk.Frame):
             )
             if not save_path:
                 return
-            shutil.copy2(db_path, save_path)
+            with open(db_path, "rb") as src, open(save_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
             self.status_label.config(text=f"Backup saved to {save_path}", foreground="green")
             self.refresh_backup_list()
         except Exception as e:
@@ -101,7 +112,8 @@ class BackupRestoreFrame(ttk.Frame):
                 return
 
             db_path = db.get_db_path()
-            shutil.copy2(restore_path, db_path)
+            with open(restore_path, "rb") as src, open(db_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
             self.status_label.config(text="Database restored successfully. Restart app to apply changes.", foreground="green")
         except Exception as e:
             self.status_label.config(text=f"Restore failed: {e}", foreground="red")
