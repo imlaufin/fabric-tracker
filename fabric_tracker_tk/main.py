@@ -9,7 +9,6 @@ from fabric_tracker_tk.ui_fabricators import FabricatorsFrame
 from fabric_tracker_tk.reports import ReportsFrame
 from fabric_tracker_tk.backup_restore import BackupRestoreFrame  # import the backup/restore UI
 
-
 class FabricTrackerApp(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -42,33 +41,116 @@ class FabricTrackerApp(tk.Tk):
         self.notebook.add(self.backup_frame, text="Backup & Restore")  # add the new tab
 
     def reload_fabricators(self):
-        # Called when Masters change
+        # Called when Masters change, handles stage updates
         try:
             self.fabricators_frame.build_tabs()
-            self.update_statuses()  # Update statuses across tabs
+            self.update_all_statuses()  # Propagate status updates
         except Exception as e:
             print("Error reloading fabricators:", e)
 
-    def update_statuses(self):
-        # Update batch/lot statuses based on purchases/dyeing
+    def update_all_statuses(self):
+        # Trigger status updates across all tabs
         with db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("UPDATE batches SET status='Knitted' WHERE id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
-            cur.execute("UPDATE lots SET status='Knitted' WHERE batch_id IN (SELECT batch_id FROM purchases WHERE delivered_to LIKE '%Knitting%')")
-            cur.execute("UPDATE batches SET status='Dyed' WHERE id IN (SELECT batch_id FROM dyeing_outputs)")
-            cur.execute("UPDATE lots SET status='Dyed' WHERE id IN (SELECT lot_id FROM dyeing_outputs)")
-            cur.execute("UPDATE batches SET status='Received' WHERE id IN (SELECT batch_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
-            cur.execute("UPDATE lots SET status='Received' WHERE id IN (SELECT lot_id FROM dyeing_outputs WHERE returned_qty_kg > 0)")
+            # Update statuses based on transactions
+            cur.execute("""
+                UPDATE batches
+                SET status='Knitted'
+                WHERE id IN (
+                    SELECT DISTINCT b.id
+                    FROM batches b
+                    JOIN purchases p ON b.batch_ref = p.batch_id
+                    WHERE p.delivered_to LIKE '%Knitting%'
+                )
+            """)
+            cur.execute("""
+                UPDATE lots
+                SET status='Knitted'
+                WHERE batch_id IN (
+                    SELECT DISTINCT b.id
+                    FROM batches b
+                    JOIN purchases p ON b.batch_ref = p.batch_id
+                    WHERE p.delivered_to LIKE '%Knitting%'
+                )
+            """)
+            cur.execute("""
+                UPDATE batches
+                SET status='Dyed'
+                WHERE id IN (
+                    SELECT DISTINCT b.id
+                    FROM batches b
+                    JOIN lots l ON b.id = l.batch_id
+                    JOIN dyeing_outputs d ON l.id = d.lot_id
+                )
+            """)
+            cur.execute("""
+                UPDATE lots
+                SET status='Dyed'
+                WHERE id IN (
+                    SELECT DISTINCT l.id
+                    FROM lots l
+                    JOIN dyeing_outputs d ON l.id = d.lot_id
+                )
+            """)
+            cur.execute("""
+                UPDATE batches
+                SET status='Received'
+                WHERE id IN (
+                    SELECT DISTINCT b.id
+                    FROM batches b
+                    JOIN lots l ON b.id = l.batch_id
+                    JOIN dyeing_outputs d ON l.id = d.lot_id
+                    WHERE d.returned_qty_kg > 0
+                )
+            """)
+            cur.execute("""
+                UPDATE lots
+                SET status='Received'
+                WHERE id IN (
+                    SELECT DISTINCT l.id
+                    FROM lots l
+                    JOIN dyeing_outputs d ON l.id = d.lot_id
+                    WHERE d.returned_qty_kg > 0
+                )
+            """)
             conn.commit()
+
+        # Reload all affected frames
         self.entries_frame.reload_entries()
         self.fabricators_frame.build_tabs()
         self.dashboard_frame.reload_all()
+        self.reports_frame.reload_data()  # Assuming reload_data exists
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
         # Proxy to fabricators frame
         if hasattr(self.fabricators_frame, "open_dyeing_tab_for_batch"):
             self.fabricators_frame.open_dyeing_tab_for_batch(dyeer_name, batch_ref)
 
+    def on_purchase_recorded(self, batch_id, lot_no, delivered_to):
+        # Callback for purchase recording
+        if batch_id and delivered_to:
+            batch_id_int = db.get_batch_id_by_ref(batch_id)
+            if batch_id_int:
+                db.update_batch_status(batch_id_int, "Ordered")
+                if lot_no:
+                    lot_id = db.get_lot_id_by_no(lot_no)
+                    if lot_id:
+                        db.update_lot_status(lot_id, "Ordered")
+            if "Knitting" in delivered_to:
+                if batch_id_int:
+                    db.update_batch_status(batch_id_int, "Knitted")
+                    if lot_id:
+                        db.update_lot_status(lot_id, "Knitted")
+        self.update_all_statuses()
+
+    def on_dyeing_output_recorded(self, lot_id):
+        # Callback for dyeing output recording
+        if lot_id:
+            db.update_lot_status(lot_id, "Dyed")
+            batch_id = db.get_batch_id_by_ref(db.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,)).fetchone()["batch_id"])
+            if batch_id:
+                db.update_batch_status(batch_id, "Dyed")
+            self.update_all_statuses()
 
 if __name__ == "__main__":
     app = FabricTrackerApp()
