@@ -110,7 +110,7 @@ class KnittingTab(ttk.Frame):
     def load_inward_transactions(self):
         for r in self.tx_tree.get_children():
             self.tx_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT date, supplier, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
@@ -124,7 +124,7 @@ class KnittingTab(ttk.Frame):
     def load_outward_transactions(self):
         for r in self.out_tx_tree.get_children():
             self.out_tx_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT date, delivered_to, yarn_type, qty_kg, qty_rolls, batch_id, lot_no
@@ -139,7 +139,7 @@ class KnittingTab(ttk.Frame):
     def load_batches(self):
         for r in self.batch_tree.get_children():
             self.batch_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (self.fabricator["id"],))
             for b in cur.fetchall():
@@ -155,7 +155,7 @@ class KnittingTab(ttk.Frame):
             return
         vals = self.batch_tree.item(sel[0])["values"]
         batch_ref = vals[0]
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT delivered_to FROM purchases WHERE batch_id=? AND delivered_to IS NOT NULL AND delivered_to != '' LIMIT 1", (batch_ref,))
             row = cur.fetchone()
@@ -188,7 +188,7 @@ class KnittingTab(ttk.Frame):
                 return
             
             # Check for duplicate batch ID
-            with get_connection() as conn:
+            with db.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("SELECT COUNT(*) as cnt FROM batches WHERE batch_ref=?", (br,))
                 if cur.fetchone()["cnt"] > 0:
@@ -204,7 +204,7 @@ class KnittingTab(ttk.Frame):
     def load_stock_summary(self):
         for r in self.summary_tree.get_children():
             self.summary_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             # Inwards
             cur.execute("""
@@ -294,7 +294,7 @@ class DyeingTab(ttk.Frame):
     def load_pending(self):
         for r in self.pending_tree.get_children():
             self.pending_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
@@ -328,7 +328,7 @@ class DyeingTab(ttk.Frame):
     def load_completed(self):
         for r in self.completed_tree.get_children():
             self.completed_tree.delete(r)
-        with get_connection() as conn:
+        with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
                 SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
