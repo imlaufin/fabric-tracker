@@ -455,8 +455,18 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                create_batch(batch_id, fabricator_id, "Default Product", 1)
-                lot_no = f"{batch_id}/1"  # lot already created by create_batch()
+                cur.execute("""
+                    INSERT INTO batches (batch_ref, fabricator_id, product_name, expected_lots, composition)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (batch_id, fabricator_id, "Default Product", 1, ""))
+                bid = cur.lastrowid
+                conn.commit()  # Commit batch
+                lot_no = f"{batch_id}/1"
+                cur.execute(
+                    "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)",
+                    (bid, lot_no, 1, qty_kg)
+                )
+                conn.commit()  # Commit lot
 
         cur.execute("""
             INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes)
@@ -464,17 +474,20 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes))
         purchase_id = cur.lastrowid
 
-        # Update lot weight if that lot exists
+        # Update lot weight and status within the same connection
         lot_id = get_lot_id_by_no(lot_no) if lot_no else None
         if lot_id:
-            cur.execute("UPDATE lots SET weight_kg=? WHERE id=?", (qty_kg, lot_id))
+            cur.execute("UPDATE lots SET weight_kg=?, status='Ordered' WHERE id=?", (qty_kg, lot_id))
 
-        # Update batch and lot status
-        if lot_id:
-            update_lot_status(lot_id, "Ordered")
+        # Update batch status
         batch_id_int = get_batch_id_by_ref(batch_id)
         if batch_id_int:
-            update_batch_status(batch_id_int, "Ordered")
+            cur.execute("UPDATE batches SET status='Ordered' WHERE id=?", (batch_id_int,))
+            cur.execute("UPDATE lots SET status='Ordered' WHERE batch_id=?", (batch_id_int,))
+            if "Knitting" in delivered_to:
+                cur.execute("UPDATE batches SET status='Knitted' WHERE id=?", (batch_id_int,))
+                if lot_id:
+                    cur.execute("UPDATE lots SET status='Knitted' WHERE id=?", (lot_id,))
 
         conn.commit()
     return purchase_id
@@ -525,7 +538,15 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
         """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
         # Update lot status based on completion
         if returned_qty_kg >= 0.9 * (conn.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["weight_kg"] or 0):
-            update_lot_status(resolved_lot_id, "Received")
+            cur = conn.cursor()
+            cur.execute("UPDATE lots SET status='Received' WHERE id=?", (resolved_lot_id,))
+            # Update batch status if all lots are received
+            cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,))
+            batch_id = cur.fetchone()["batch_id"]
+            cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
+            min_status = cur.fetchone()["min_status"]
+            if min_status == "Received":
+                cur.execute("UPDATE batches SET status='Received' WHERE id=?", (batch_id,))
         conn.commit()
 
 def delete_dyeing_output(dyeing_id: int):
@@ -546,9 +567,8 @@ def update_batch_status(batch_id, status):
     if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
         raise ValueError(f"Invalid status: {status}")
     with get_connection() as conn:
-        # Update all lots under this batch
-        conn.execute("UPDATE lots SET status=? WHERE batch_id=?", (status, batch_id))
         conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
+        conn.execute("UPDATE lots SET status=? WHERE batch_id=?", (status, batch_id))
         conn.commit()
 
 def update_lot_status(lot_id, status):
@@ -556,7 +576,7 @@ def update_lot_status(lot_id, status):
         raise ValueError(f"Invalid status: {status}")
     with get_connection() as conn:
         conn.execute("UPDATE lots SET status=? WHERE id=?", (status, lot_id))
-        # Update batch status if all lots are at or beyond this status
+        # Update batch status based on minimum lot status
         cur = conn.cursor()
         cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
         batch_id = cur.fetchone()["batch_id"]
