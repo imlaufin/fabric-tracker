@@ -132,9 +132,8 @@ class FabricTrackerApp(tk.Tk):
         self.entries_frame.reload_entries()
         self.fabricators_frame.build_tabs()
         self.dashboard_frame.reload_all()
-        # Commented out due to AttributeError; implement in ReportsFrame if needed
-        # if hasattr(self.reports_frame, "reload_data"):
-        #     self.reports_frame.reload_data()
+        if hasattr(self.reports_frame, "reload_data"):
+            self.reports_frame.reload_data()
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
         # Proxy to fabricators frame
