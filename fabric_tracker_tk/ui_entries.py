@@ -114,7 +114,7 @@ class EntriesFrame(ttk.Frame):
         self.delivered_cb.grid(row=3, column=1, sticky="w")
         ttk.Button(frm, text="Save", command=self.save_purchase).grid(row=4, column=0, pady=8, sticky="w")
         ttk.Button(frm, text="Clear (Qty/Lot)", command=self.clear_purchase_form).grid(row=4, column=1, sticky="w")
-        ttk.Button(frm, text="Create Lots", command=self.create_lot_dialog).grid(row=4, column=2, sticky="w")
+        ttk.Button(frm, text="Create Batch", command=self.create_batch_dialog).grid(row=4, column=2, sticky="w")
         ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3, sticky="w")
         self.delivered_cb.bind("<Return>", lambda e: self._snap_autocomplete(self.delivered_cb))
 
@@ -228,6 +228,7 @@ class EntriesFrame(ttk.Frame):
         suppliers = [r["name"] for r in db.list_suppliers()]
         yarn_types = db.list_yarn_types()
         dyeing_units = [r["name"] for r in db.list_suppliers("dyeing_unit")]
+        knitting_units = [r["name"] for r in db.list_suppliers("knitting_unit")]
         self.supplier_cb.set_completion_list(suppliers)
         self.delivered_cb.set_completion_list(suppliers)
         self.yarn_cb.set_completion_list(yarn_types)
@@ -308,10 +309,10 @@ class EntriesFrame(ttk.Frame):
         delivered = self.delivered_cb.get().strip()
 
         if delivered and delivered not in list(self.delivered_cb["values"]):
-            self._ensure_supplier_exists(delivered, supplier_type="supplier")
+            self._ensure_supplier_exists(delivered)
 
         if supplier and supplier not in list(self.supplier_cb["values"]):
-            self._ensure_supplier_exists(supplier, supplier_type="supplier")
+            self._ensure_supplier_exists(supplier)
 
         if yarn and yarn not in list(self.yarn_cb["values"]):
             self._ensure_yarn_type_exists(yarn)
@@ -378,80 +379,94 @@ class EntriesFrame(ttk.Frame):
             }
         self.selected_purchase_id = None
 
-    def create_lot_dialog(self):
-        batch_ref = self.batch_e.get().strip()
-        if not batch_ref:
-            messagebox.showwarning("Batch required", "Enter the batch id first.")
-            return
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id, expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
-        row = cur.fetchone()
-        fabricator_name = self.delivered_cb.get().strip()
-        fabricator_id = db.get_supplier_id_by_name(fabricator_name, "knitting_unit")
-        if not row and not fabricator_id:
-            messagebox.showerror("Invalid Fabricator", f"Fabricator '{fabricator_name}' not found or not a knitting unit.")
-            conn.close()
-            return
-        if not row:
-            if messagebox.askyesno("Batch not found", f"Batch '{batch_ref}' not found. Create new batch for '{fabricator_name}' with 1 lot?"):
-                db.create_batch(batch_ref, fabricator_id, "", 1, "")
-            else:
-                conn.close()
-                return
-        b_id = row["id"] if row else db.get_batch_id_by_ref(batch_ref)
-        try:
-            lots = int(simpledialog.askstring("Lots", f"How many lots to create for batch '{batch_ref}'?\n(Each lot will be numbered sequentially, e.g., {batch_ref}/1, {batch_ref}/2)", parent=self) or "0")
-        except ValueError:
-            lots = 0
-        if lots <= 0:
-            conn.close()
-            return
-        cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
-        maxidx = cur.fetchone()["maxidx"] or 0
-        for i in range(1, lots + 1):
-            db.create_lot(b_id, maxidx + i, 0)  # Default weight_kg=0
-        conn.close()
-        messagebox.showinfo("Done", f"{lots} lots created for batch '{batch_ref}' with initial status 'Pending'.")
-        self.refresh_lists()  # Auto-refresh to update lot options
-        if self.controller and hasattr(self.controller, "on_purchase_recorded"):
-            self.controller.on_purchase_recorded(batch_ref, f"{batch_ref}/{maxidx + 1}", fabricator_name)  # Trigger status update
+    def create_batch_dialog(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Create New Batch")
+        dialog.geometry("400x300")
+        dialog.transient(self)
+        dialog.grab_set()
 
-    def on_purchase_double_click(self, event):
-        item = self.tree.selection()
-        if not item:
-            return
-        purchase_id = int(item[0])
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,))
-            row = cur.fetchone()
-        if not row:
-            return
-        self.selected_purchase_id = purchase_id
-        self.date_e.delete(0, tk.END)
-        self.date_e.insert(0, db.db_to_ui_date(row["date"]))
-        self.batch_e.delete(0, tk.END)
-        self.batch_e.insert(0, row["batch_id"])
-        self.lot_e.delete(0, tk.END)
-        self.lot_e.insert(0, row["lot_no"])
-        self.supplier_cb.set(row["supplier"])
-        self.yarn_cb.set(row["yarn_type"])
-        self.kg_e.delete(0, tk.END)
-        self.kg_e.insert(0, row["qty_kg"])
-        self.rolls_e.delete(0, tk.END)
-        self.rolls_e.insert(0, row["qty_rolls"])
-        self.price_e.delete(0, tk.END)
-        self.price_e.insert(0, row["price_per_unit"])
-        self.delivered_cb.set(row["delivered_to"])
-        self._last_purchase_defaults.update({
-            "date": self.date_e.get(),
-            "batch": self.batch_e.get(),
-            "supplier": self.supplier_cb.get(),
-            "yarn": self.yarn_cb.get(),
-            "price": self.price_e.get(),
-            "delivered": self.delivered_cb.get(),
-        })
+        # Fields
+        ttk.Label(dialog, text="Batch Number:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        batch_e = ttk.Entry(dialog, width=30)
+        batch_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(dialog, text="Number of Lots:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        lots_e = ttk.Entry(dialog, width=30)
+        lots_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(dialog, text="Product Name:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        product_e = ttk.Entry(dialog, width=30)
+        product_e.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(dialog, text="Fabric Name:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        fabric_e = ttk.Entry(dialog, width=30)
+        fabric_e.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+
+        ttk.Label(dialog, text="Has Rib?").grid(row=4, column=0, padx=5, pady=5, sticky="e")
+        rib_var = tk.StringVar(value="No")
+        ttk.Radiobutton(dialog, text="Yes", variable=rib_var, value="Yes").grid(row=4, column=1, sticky="w")
+        ttk.Radiobutton(dialog, text="No", variable=rib_var, value="No").grid(row=4, column=1, sticky="e", padx=5)
+
+        ttk.Label(dialog, text="Has Collar?").grid(row=5, column=0, padx=5, pady=5, sticky="e")
+        collar_var = tk.StringVar(value="No")
+        ttk.Radiobutton(dialog, text="Yes", variable=collar_var, value="Yes").grid(row=5, column=1, sticky="w")
+        ttk.Radiobutton(dialog, text="No", variable=collar_var, value="No").grid(row=5, column=1, sticky="e", padx=5)
+
+        ttk.Label(dialog, text="Knitting Unit:").grid(row=6, column=0, padx=5, pady=5, sticky="e")
+        knitting_cb = AutocompleteCombobox(dialog, width=30)
+        knitting_cb.grid(row=6, column=1, padx=5, pady=5, sticky="w")
+        knitting_units = [r["name"] for r in db.list_suppliers("knitting_unit")]
+        knitting_cb.set_completion_list(knitting_units)
+
+        ttk.Label(dialog, text="Dyeing Unit:").grid(row=7, column=0, padx=5, pady=5, sticky="e")
+        dyeing_cb = AutocompleteCombobox(dialog, width=30)
+        dyeing_cb.grid(row=7, column=1, padx=5, pady=5, sticky="w")
+        dyeing_units = [r["name"] for r in db.list_suppliers("dyeing_unit")]
+        dyeing_cb.set_completion_list(dyeing_units)
+
+        def save_batch():
+            batch_num = batch_e.get().strip()
+            lots = lots_e.get().strip()
+            product = product_e.get().strip()
+            fabric = fabric_e.get().strip()
+            has_rib = rib_var.get()
+            has_collar = collar_var.get()
+            knitting_unit = knitting_cb.get().strip()
+            dyeing_unit = dyeing_cb.get().strip()
+
+            if not batch_num or not lots or not knitting_unit:
+                messagebox.showwarning("Missing Fields", "Batch Number, Number of Lots, and Knitting Unit are required.")
+                return
+
+            try:
+                lots_int = int(lots)
+                if lots_int <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Number of Lots must be a positive integer.")
+                return
+
+            knitting_id = db.get_supplier_id_by_name(knitting_unit, "knitting_unit")
+            if not knitting_id:
+                messagebox.showerror("Invalid Unit", f"Knitting unit '{knitting_unit}' not found.")
+                return
+
+            dyeing_id = db.get_supplier_id_by_name(dyeing_unit, "dyeing_unit") if dyeing_unit else None
+            if dyeing_unit and not dyeing_id:
+                messagebox.showerror("Invalid Unit", f"Dyeing unit '{dyeing_unit}' not found.")
+                return
+
+            composition = f"Rib: {has_rib}, Collar: {has_collar}"
+            db.create_batch(batch_num, knitting_id, product, lots_int, composition)
+            messagebox.showinfo("Success", f"Batch '{batch_num}' created with {lots_int} lots.")
+            dialog.destroy()
+            self.refresh_lists()
+            if self.controller and hasattr(self.controller, "fabricators_frame"):
+                self.controller.fabricators_frame.build_tabs()
+
+        ttk.Button(dialog, text="Save", command=save_batch).grid(row=8, column=0, columnspan=2, pady=10)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=9, column=0, columnspan=2, pady=5)
 
     def reload_dyeing_outputs(self):
         for r in self.dye_tree.get_children():
@@ -502,17 +517,18 @@ class EntriesFrame(ttk.Frame):
             # Cross-reference lot_no with existing lots and ensure it's valid
             lot_id = db.get_lot_id_by_no(lot_no)
             if lot_id is None:
-                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Create it via the 'Purchases' tab first.")
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Create it via the 'Create Batch' dialog first.")
                 return
             # Verify the lot is associated with this dyeing unit's pending batches
             cur.execute("""
                 SELECT p.batch_id, p.lot_no
                 FROM purchases p
-                WHERE p.lot_no = ? AND p.delivered_to = ?
-            """, (lot_no, unit))
+                JOIN lots l ON l.lot_no = p.lot_no
+                WHERE p.lot_no = ? AND l.status IN ('Knitted', 'Dyed')
+            """, (lot_no,))
             pending_lot = cur.fetchone()
             if not pending_lot:
-                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not assigned to '{unit}' in pending batches.")
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not in a valid state for dyeing (must be Knitted or Dyed).")
                 return
 
             try:
@@ -553,6 +569,42 @@ class EntriesFrame(ttk.Frame):
         self.returned_rolls_e.delete(0, tk.END)
         self.returned_notes_e.delete(0, tk.END)
         self.selected_dyeing_id = None
+
+    def on_purchase_double_click(self, event):
+        item = self.tree.selection()
+        if not item:
+            return
+        purchase_id = int(item[0])
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,))
+            row = cur.fetchone()
+        if not row:
+            return
+        self.selected_purchase_id = purchase_id
+        self.date_e.delete(0, tk.END)
+        self.date_e.insert(0, db.db_to_ui_date(row["date"]))
+        self.batch_e.delete(0, tk.END)
+        self.batch_e.insert(0, row["batch_id"])
+        self.lot_e.delete(0, tk.END)
+        self.lot_e.insert(0, row["lot_no"])
+        self.supplier_cb.set(row["supplier"])
+        self.yarn_cb.set(row["yarn_type"])
+        self.kg_e.delete(0, tk.END)
+        self.kg_e.insert(0, row["qty_kg"])
+        self.rolls_e.delete(0, tk.END)
+        self.rolls_e.insert(0, row["qty_rolls"])
+        self.price_e.delete(0, tk.END)
+        self.price_e.insert(0, row["price_per_unit"])
+        self.delivered_cb.set(row["delivered_to"])
+        self._last_purchase_defaults.update({
+            "date": self.date_e.get(),
+            "batch": self.batch_e.get(),
+            "supplier": self.supplier_cb.get(),
+            "yarn": self.yarn_cb.get(),
+            "price": self.price_e.get(),
+            "delivered": self.delivered_cb.get(),
+        })
 
     def on_dyeing_double_click(self, event):
         item = self.dye_tree.selection()
