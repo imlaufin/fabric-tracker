@@ -76,7 +76,7 @@ class EntriesFrame(ttk.Frame):
         self.notebook.add(self.tab_purchases, text="Purchases")
         self.build_purchase_form(self.tab_purchases)
         self.build_purchase_table(self.tab_purchases)
-        self.tab_dyeing = ttk.Frame(self.notebook)
+        self.tab_dyeing = ttk.Frame(self.tab_purchases)
         self.notebook.add(self.tab_dyeing, text="Dyeing Outputs")
         self.build_dyeing_form(self.tab_dyeing)
         self.build_dyeing_table(self.tab_dyeing)
@@ -230,7 +230,7 @@ class EntriesFrame(ttk.Frame):
         dyeing_units = [r["name"] for r in db.list_suppliers("dyeing_unit")]
         knitting_units = [r["name"] for r in db.list_suppliers("knitting_unit")]
         self.supplier_cb.set_completion_list(suppliers)
-        self.delivered_cb.set_completion_list(suppliers)
+        self.delivered_cb.set_completion_list(knitting_units + dyeing_units)  # Allow delivery to knitting or dyeing
         self.yarn_cb.set_completion_list(yarn_types)
         self.dyeing_unit_cb.set_completion_list(dyeing_units)
         if self._last_purchase_defaults["supplier"]:
@@ -458,7 +458,7 @@ class EntriesFrame(ttk.Frame):
                 return
 
             composition = f"Rib: {has_rib}, Collar: {has_collar}"
-            db.create_batch(batch_num, knitting_id, product, lots_int, composition)
+            db.create_batch(batch_num, knitting_id, product, lots_int, composition, dyeing_id)
             messagebox.showinfo("Success", f"Batch '{batch_num}' created with {lots_int} lots.")
             dialog.destroy()
             self.refresh_lists()
@@ -524,11 +524,12 @@ class EntriesFrame(ttk.Frame):
                 SELECT p.batch_id, p.lot_no
                 FROM purchases p
                 JOIN lots l ON l.lot_no = p.lot_no
-                WHERE p.lot_no = ? AND l.status IN ('Knitted', 'Dyed')
-            """, (lot_no,))
+                JOIN batches b ON b.id = l.batch_id
+                WHERE p.lot_no = ? AND l.status IN ('Knitted', 'Dyed') AND (b.dyeing_unit_id = ? OR b.dyeing_unit_id IS NULL)
+            """, (lot_no, unit_id))
             pending_lot = cur.fetchone()
             if not pending_lot:
-                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not in a valid state for dyeing (must be Knitted or Dyed).")
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not in a valid state for dyeing (must be Knitted or Dyed) or not assigned to dyeing unit '{unit}'.")
                 return
 
             try:
