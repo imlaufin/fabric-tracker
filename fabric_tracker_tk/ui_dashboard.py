@@ -71,8 +71,7 @@ class DashboardFrame(ttk.Frame):
             sql = """
                 SELECT p.date, p.batch_id, p.lot_no, p.supplier, p.yarn_type, p.qty_kg, p.qty_rolls, p.delivered_to,
                        b.status AS batch_status,
-                       COALESCE(SUM(d.returned_qty_kg), 0) AS returned_kg,
-                       db.calculate_net_price(p.batch_id) AS net_price
+                       COALESCE(SUM(d.returned_qty_kg), 0) AS returned_kg
                 FROM purchases p
                 LEFT JOIN batches b ON b.batch_ref = p.batch_id
                 LEFT JOIN lots l ON l.lot_no = p.lot_no
@@ -109,7 +108,8 @@ class DashboardFrame(ttk.Frame):
                 status = r["batch_status"] or "Ordered"
                 returned_kg = r["returned_kg"] or 0
                 shortage_kg = max(0, r["qty_kg"] - returned_kg)  # Simple shortage calculation
-                net_price = r["net_price"] or 0
+                # Placeholder net price calculation (to be replaced with db.calculate_net_price when available)
+                net_price = r["qty_kg"] * 100 if r["qty_kg"] else 0  # Example: $100 per kg
 
                 self.tree.insert("", "end", values=(display_date, r["batch_id"], r["lot_no"], r["supplier"], 
                                                   r["yarn_type"], r["qty_kg"], r["qty_rolls"], r["delivered_to"],
