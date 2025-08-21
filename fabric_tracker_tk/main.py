@@ -113,13 +113,28 @@ class FabricTrackerApp(tk.Tk):
                     WHERE d.returned_qty_kg > 0
                 )
             """)
+            # Set "Pending" for lots/batches with no dyeing output
+            cur.execute("""
+                UPDATE lots
+                SET status='Pending'
+                WHERE status NOT IN ('Knitted', 'Dyed', 'Received')
+                AND id NOT IN (SELECT lot_id FROM dyeing_outputs)
+            """)
+            cur.execute("""
+                UPDATE batches
+                SET status='Pending'
+                WHERE status NOT IN ('Knitted', 'Dyed', 'Received')
+                AND id NOT IN (SELECT batch_id FROM lots WHERE id IN (SELECT lot_id FROM dyeing_outputs))
+            """)
             conn.commit()
 
         # Reload all affected frames
         self.entries_frame.reload_entries()
         self.fabricators_frame.build_tabs()
         self.dashboard_frame.reload_all()
-        self.reports_frame.reload_data()  # Assuming reload_data exists
+        # Commented out due to AttributeError; implement in ReportsFrame if needed
+        # if hasattr(self.reports_frame, "reload_data"):
+        #     self.reports_frame.reload_data()
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
         # Proxy to fabricators frame
@@ -146,9 +161,12 @@ class FabricTrackerApp(tk.Tk):
     def on_dyeing_output_recorded(self, lot_id):
         # Callback for dyeing output recording
         if lot_id:
-            db.update_lot_status(lot_id, "Dyed")
-            batch_id = db.get_batch_id_by_ref(db.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,)).fetchone()["batch_id"])
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
+                batch_id = cur.fetchone()["batch_id"]
             if batch_id:
+                db.update_lot_status(lot_id, "Dyed")
                 db.update_batch_status(batch_id, "Dyed")
             self.update_all_statuses()
 
