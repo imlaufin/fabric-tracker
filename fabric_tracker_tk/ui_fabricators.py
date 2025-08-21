@@ -54,7 +54,6 @@ class KnittingTab(ttk.Frame):
         top.pack(fill="x", padx=6, pady=6)
 
         ttk.Label(top, text=f"Knitting Unit: {self.fabricator['name']}", font=("Arial", 12, "bold")).pack(side="left")
-        ttk.Button(top, text="New Batch", command=self.create_batch_dialog).pack(side="right", padx=4)
         ttk.Button(top, text="Refresh", command=self.reload_all).pack(side="right", padx=4)
 
         # Inward Transactions
@@ -82,8 +81,8 @@ class KnittingTab(ttk.Frame):
         # Batch Status
         batch_frame = ttk.LabelFrame(parent, text="Batches & Status")
         batch_frame.pack(fill="x", padx=6, pady=6)
-        self.batch_tree = ttk.Treeview(batch_frame, columns=("batch_ref","product","expected","delivered","pending"), show="headings", height=6)
-        for col, text, w in zip(("batch_ref","product","expected","delivered","pending"), ["Batch","Product","Expected","Delivered","Pending"], [120,200,80,80,80]):
+        self.batch_tree = ttk.Treeview(batch_frame, columns=("batch_ref", "product", "expected", "delivered", "pending", "status"), show="headings", height=6)
+        for col, text, w in zip(("batch_ref", "product", "expected", "delivered", "pending", "status"), ["Batch", "Product", "Expected", "Delivered", "Pending", "Status"], [120, 200, 80, 80, 80, 100]):
             self.batch_tree.heading(col, text=text)
             self.batch_tree.column(col, width=w)
         self.batch_tree.pack(fill="x", expand=True)
@@ -92,8 +91,8 @@ class KnittingTab(ttk.Frame):
         # Stock Summary (only Kg for knitting)
         summary_frame = ttk.LabelFrame(parent, text="Yarn Stock Summary (Current balance in Kg)")
         summary_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        self.summary_tree = ttk.Treeview(summary_frame, columns=("yarn_type","balance_kg"), show="headings", height=8)
-        for col, text, w in zip(("yarn_type","balance_kg"), ["Yarn Type","Balance (kg)"], [200,120]):
+        self.summary_tree = ttk.Treeview(summary_frame, columns=("yarn_type", "balance_kg"), show="headings", height=8)
+        for col, text, w in zip(("yarn_type", "balance_kg"), ["Yarn Type", "Balance (kg)"], [200, 120]):
             self.summary_tree.heading(col, text=text)
             self.summary_tree.column(col, width=w)
         self.summary_tree.pack(fill="both", expand=True)
@@ -147,7 +146,8 @@ class KnittingTab(ttk.Frame):
                 delivered = cur.fetchone()["cnt"] or 0
                 expected = b["expected_lots"] or 0
                 pending = max(0, expected - delivered)
-                self.batch_tree.insert("", "end", values=(b["batch_ref"], b["product_name"], expected, delivered, pending))
+                status = b["status"]  # Use the status from the database
+                self.batch_tree.insert("", "end", values=(b["batch_ref"], b["product_name"], expected, delivered, pending, status))
 
     def on_batch_double(self, event):
         sel = self.batch_tree.selection()
@@ -161,45 +161,6 @@ class KnittingTab(ttk.Frame):
             row = cur.fetchone()
         if row and self.controller and hasattr(self.controller, "open_dyeing_tab_for_batch"):
             self.controller.open_dyeing_tab_for_batch(row["delivered_to"], batch_ref)
-
-    def create_batch_dialog(self):
-        dialog = tk.Toplevel(self)
-        dialog.title("Create Batch")
-        tk.Label(dialog, text="Batch ID:").grid(row=0, column=0)
-        bid = tk.Entry(dialog); bid.grid(row=0, column=1)
-        tk.Label(dialog, text="Product Name:").grid(row=1, column=0)
-        pname = tk.Entry(dialog); pname.grid(row=1, column=1)
-        tk.Label(dialog, text="Expected Lots:").grid(row=2, column=0)
-        lots = tk.Entry(dialog); lots.grid(row=2, column=1)
-        tk.Label(dialog, text="Composition (optional):").grid(row=3, column=0)
-        comp = tk.Entry(dialog, width=40); comp.grid(row=3, column=1)
-
-        def on_create():
-            br = bid.get().strip()
-            pname_val = pname.get().strip()
-            comp_val = comp.get().strip()
-            try:
-                expected = int(lots.get().strip() or 0)
-            except ValueError:
-                messagebox.showerror("Invalid", "Expected lots must be an integer")
-                return
-            if not br:
-                messagebox.showerror("Invalid", "Batch ID required")
-                return
-            
-            # Check for duplicate batch ID
-            with db.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) as cnt FROM batches WHERE batch_ref=?", (br,))
-                if cur.fetchone()["cnt"] > 0:
-                    messagebox.showerror("Duplicate", f"Batch ID '{br}' already exists.")
-                    return
-
-            db.create_batch(br, self.fabricator["id"], pname_val, expected, comp_val)
-            self.load_batches()
-            dialog.destroy()
-
-        ttk.Button(dialog, text="Create", command=on_create).grid(row=4, column=0, columnspan=2, pady=6)
 
     def load_stock_summary(self):
         for r in self.summary_tree.get_children():
@@ -267,11 +228,11 @@ class DyeingTab(ttk.Frame):
 
         pending_frame = ttk.LabelFrame(parent, text="Pending Batches")
         pending_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        cols = ("batch_id","lot_no","type","orig_kg","orig_rolls","returned_kg","returned_rolls","short_kg","short_pct")
-        headings = ["Batch","Lot","Type","Orig (kg)","Orig (rolls)","Returned (kg)","Returned (rolls)","Short (kg)","Short (%)"]
-        widths = [80,120,80,100,100,100,100,90,90]
+        cols = ("batch_id", "lot_no", "type", "orig_kg", "orig_rolls", "returned_kg", "returned_rolls", "short_kg", "short_pct")
+        headings = ["Batch", "Lot", "Type", "Orig (kg)", "Orig (rolls)", "Returned (kg)", "Returned (rolls)", "Short (kg)", "Short (%)"]
+        widths = [80, 120, 80, 100, 100, 100, 100, 90, 90]
         self.pending_tree = ttk.Treeview(pending_frame, columns=cols, show="headings", height=8)
-        for c,h,w in zip(cols, headings, widths):
+        for c, h, w in zip(cols, headings, widths):
             self.pending_tree.heading(c, text=h)
             self.pending_tree.column(c, width=w)
         self.pending_tree.pack(fill="both", expand=True)
@@ -279,7 +240,7 @@ class DyeingTab(ttk.Frame):
         completed_frame = ttk.LabelFrame(parent, text="Completed Batches")
         completed_frame.pack(fill="both", expand=True, padx=6, pady=6)
         self.completed_tree = ttk.Treeview(completed_frame, columns=cols, show="headings", height=8)
-        for c,h,w in zip(cols, headings, widths):
+        for c, h, w in zip(cols, headings, widths):
             self.completed_tree.heading(c, text=h)
             self.completed_tree.column(c, width=w)
         self.completed_tree.pack(fill="both", expand=True)
