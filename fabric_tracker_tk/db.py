@@ -36,7 +36,8 @@ def backup_db():
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_PATH, f"fabric_backup_{ts}.db")
     if os.path.exists(get_db_path()):
-        shutil.copy2(get_db_path(), dest)
+        with open(get_db_path(), "rb") as src, open(dest, "wb") as dst:
+            shutil.copyfileobj(src, dst)
     backups = sorted([f for f in os.listdir(BACKUP_PATH) if f.startswith("fabric_backup_")])
     while len(backups) > MAX_BACKUPS:
         old_backup = backups.pop(0)
@@ -48,7 +49,8 @@ def backup_db():
 
 def restore_backup(path):
     if os.path.exists(path):
-        shutil.copy2(path, get_db_path())
+        with open(path, "rb") as src, open(get_db_path(), "wb") as dst:
+            shutil.copyfileobj(src, dst)
 
 # ----------------------------
 # Database Connection
@@ -475,7 +477,7 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         purchase_id = cur.lastrowid
 
         # Update lot weight and status within the same connection
-        lot_id = get_lot_id_by_no(lot_no) if lot_no else None
+        lot_id = get_lot_id_by_no(lot_no)
         if lot_id:
             cur.execute("UPDATE lots SET weight_kg=?, status='Ordered' WHERE id=?", (qty_kg, lot_id))
 
@@ -483,7 +485,8 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         batch_id_int = get_batch_id_by_ref(batch_id)
         if batch_id_int:
             cur.execute("UPDATE batches SET status='Ordered' WHERE id=?", (batch_id_int,))
-            cur.execute("UPDATE lots SET status='Ordered' WHERE batch_id=?", (batch_id_int,))
+            if lot_id:
+                cur.execute("UPDATE lots SET status='Ordered' WHERE id=?", (lot_id,))
             if "Knitting" in delivered_to:
                 cur.execute("UPDATE batches SET status='Knitted' WHERE id=?", (batch_id_int,))
                 if lot_id:
@@ -540,7 +543,8 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
             VALUES (?, ?, ?, ?, ?, ?)
         """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
         # Update lot status based on completion
-        weight_kg = cur.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["weight_kg"] or 0
+        cur.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,))
+        weight_kg = cur.fetchone()["weight_kg"] or 0
         if returned_qty_kg >= 0.9 * weight_kg:
             cur.execute("UPDATE lots SET status='Received' WHERE id=?", (resolved_lot_id,))
             batch_id = cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["batch_id"]
@@ -548,6 +552,10 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
             min_status = cur.fetchone()["min_status"]
             if min_status == "Received":
                 cur.execute("UPDATE batches SET status='Received' WHERE id=?", (batch_id,))
+        elif returned_qty_kg > 0:
+            cur.execute("UPDATE lots SET status='Dyed' WHERE id=?", (resolved_lot_id,))
+            batch_id = cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["batch_id"]
+            cur.execute("UPDATE batches SET status='Dyed' WHERE id=?", (batch_id,))
         conn.commit()
 
 def delete_dyeing_output(dyeing_id: int):
