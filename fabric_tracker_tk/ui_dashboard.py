@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk
-import sqlite3
 from fabric_tracker_tk import db
 from datetime import datetime
 
@@ -8,54 +7,83 @@ class DashboardFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
         super().__init__(parent)
         self.controller = controller
+        self.pack(fill="both", expand=True, padx=10, pady=10)
         self.build_ui()
         self.reload_all()
 
     def build_ui(self):
-        # Top summary frame
-        summary_frame = ttk.Frame(self)
-        summary_frame.pack(fill="x", padx=6, pady=6)
+        # Main container with grid layout
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
 
-        self.total_purchases_label = ttk.Label(summary_frame, text="Total Purchases: 0", font=("Arial", 12))
-        self.total_purchases_label.pack(side="left", padx=6)
-        self.total_yarn_kg_label = ttk.Label(summary_frame, text="Total Yarn (kg): 0", font=("Arial", 12))
-        self.total_yarn_kg_label.pack(side="left", padx=6)
-        self.total_batches_label = ttk.Label(summary_frame, text="Total Batches: 0", font=("Arial", 12))
-        self.total_batches_label.pack(side="left", padx=6)
+        # Left Panel: Status Overview
+        self.left_frame = ttk.Frame(self)
+        self.left_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
+        self.left_frame.columnconfigure(0, weight=1)
 
-        # Fabricator filter
+        ttk.Label(self.left_frame, text="Status Overview", font=("Helvetica", 14, "bold")).grid(row=0, column=0, pady=5)
+        self.status_vars = {}
+        statuses = ["Ordered", "Knitted", "Dyed", "Received"]
+        for i, status in enumerate(statuses, 1):
+            frame = ttk.Frame(self.left_frame)
+            frame.grid(row=i, column=0, pady=5, sticky="ew")
+            ttk.Label(frame, text=f"{status}:", width=10).pack(side="left")
+            self.status_vars[status] = tk.StringVar()
+            ttk.Label(frame, textvariable=self.status_vars[status], width=5).pack(side="left")
+            ttk.Progressbar(frame, length=150, maximum=100, mode="determinate").pack(side="left", padx=5)
+
+        # Right Panel: Filters and Actions
+        self.right_frame = ttk.Frame(self)
+        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.right_frame.columnconfigure(0, weight=1)
+
+        # Filters
+        ttk.Label(self.right_frame, text="Filters", font=("Helvetica", 14, "bold")).grid(row=0, column=0, pady=5)
+        filter_frame = ttk.Frame(self.right_frame)
+        filter_frame.grid(row=1, column=0, pady=5, sticky="ew")
         self.fabricator_var = tk.StringVar()
         fabricators = [f["name"] for f in db.get_fabricators("knitting_unit")] + [f["name"] for f in db.get_fabricators("dyeing_unit")]
         fabricators.insert(0, "")  # Empty option for all
-        ttk.Label(summary_frame, text="Fabricator:").pack(side="left", padx=6)
-        ttk.OptionMenu(summary_frame, self.fabricator_var, "", *fabricators, command=lambda x: self.reload_all()).pack(side="left", padx=4)
-
-        # Date filter
-        filter_frame = ttk.Frame(self)
-        filter_frame.pack(fill="x", padx=6, pady=6)
-        ttk.Label(filter_frame, text="From (dd/mm/yyyy):").pack(side="left")
+        ttk.Label(filter_frame, text="Fabricator:").pack(side="left", padx=4)
+        ttk.OptionMenu(filter_frame, self.fabricator_var, "", *fabricators).pack(side="left", padx=4)
+        ttk.Label(filter_frame, text="From (dd/mm/yyyy):").pack(side="left", padx=4)
         self.from_entry = ttk.Entry(filter_frame, width=12)
         self.from_entry.pack(side="left", padx=4)
-        ttk.Label(filter_frame, text="To (dd/mm/yyyy):").pack(side="left")
+        ttk.Label(filter_frame, text="To (dd/mm/yyyy):").pack(side="left", padx=4)
         self.to_entry = ttk.Entry(filter_frame, width=12)
         self.to_entry.pack(side="left", padx=4)
         ttk.Button(filter_frame, text="Apply Filter", command=self.reload_all).pack(side="left", padx=6)
 
-        # Purchase summary table
-        self.tree_frame = ttk.Frame(self)
-        self.tree_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        cols = ("date", "batch_id", "lot_no", "supplier", "yarn_type", "qty_kg", "qty_rolls", "delivered_to", "status", "shortage_kg", "net_price")
-        self.tree = ttk.Treeview(self.tree_frame, columns=cols, show="headings")
-        for col, width, heading in zip(cols, [100, 100, 80, 150, 120, 100, 100, 150, 100, 100, 100], 
-                                      ["Date", "Batch", "Lot", "Supplier", "Yarn Type", "Kg", "Rolls", "Delivered To", "Status", "Shortage (kg)", "Net Price"]):
-            self.tree.heading(col, text=heading)
-            self.tree.column(col, width=width)
-        self.tree.pack(fill="both", expand=True)
+        # Actions
+        ttk.Label(self.right_frame, text="Actions", font=("Helvetica", 14, "bold")).grid(row=2, column=0, pady=5)
+        ttk.Button(self.right_frame, text="Refresh Data", command=self.reload_all).grid(row=3, column=0, pady=5)
+        ttk.Button(self.right_frame, text="View Fabricators", command=lambda: self.controller.notebook.select(self.controller.fabricators_frame)).grid(row=4, column=0, pady=5)
+        ttk.Button(self.right_frame, text="View Entries", command=lambda: self.controller.notebook.select(self.controller.entries_frame)).grid(row=5, column=0, pady=5)
+
+        # Chart Area
+        self.chart_frame = ttk.Frame(self)
+        self.chart_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+        self.chart_frame.columnconfigure(0, weight=1)
+        ttk.Label(self.chart_frame, text="Status Distribution", font=("Helvetica", 12, "bold")).grid(row=0, column=0, pady=5)
+        self.chart_label = ttk.Label(self.chart_frame, text="Chart Placeholder")
+        self.chart_label.grid(row=1, column=0)
+
+        # Summary Stats
+        self.summary_frame = ttk.Frame(self)
+        self.summary_frame.grid(row=2, column=1, sticky="sew", padx=5, pady=5)
+        self.total_purchases_label = ttk.Label(self.summary_frame, text="Total Purchases: 0", font=("Arial", 12))
+        self.total_purchases_label.pack(side="left", padx=6)
+        self.total_yarn_kg_label = ttk.Label(self.summary_frame, text="Total Yarn (kg): 0", font=("Arial", 12))
+        self.total_yarn_kg_label.pack(side="left", padx=6)
+        self.total_batches_label = ttk.Label(self.summary_frame, text="Total Batches: 0", font=("Arial", 12))
+        self.total_batches_label.pack(side="left", padx=6)
 
     def reload_all(self):
-        # clear tree
-        for r in self.tree.get_children():
-            self.tree.delete(r)
+        # Clear existing status data
+        for status in self.status_vars:
+            self.status_vars[status].set("0 / 0")
 
         from_date = self.from_entry.get().strip()
         to_date = self.to_entry.get().strip()
@@ -68,61 +96,55 @@ class DashboardFrame(ttk.Frame):
 
         with db.get_connection() as conn:
             cur = conn.cursor()
+            # Status counts
             sql = """
-                SELECT p.date, p.batch_id, p.lot_no, p.supplier, p.yarn_type, p.qty_kg, p.qty_rolls, p.delivered_to,
-                       b.status AS batch_status,
-                       COALESCE(SUM(d.returned_qty_kg), 0) AS returned_kg
-                FROM purchases p
-                LEFT JOIN batches b ON b.batch_ref = p.batch_id
-                LEFT JOIN lots l ON l.lot_no = p.lot_no
-                LEFT JOIN dyeing_outputs d ON d.lot_id = l.id
-                GROUP BY p.id
+                SELECT b.status, COUNT(DISTINCT b.id) AS batch_count, COUNT(DISTINCT l.id) AS lot_count
+                FROM batches b
+                LEFT JOIN lots l ON b.id = l.batch_id
+                LEFT JOIN purchases p ON b.batch_ref = p.batch_id
             """
             params = ()
-            fabricator = self.fabricator_var.get()
             if from_db and to_db:
                 sql += " WHERE p.date BETWEEN ? AND ?"
                 params = (from_db, to_db)
+            fabricator = self.fabricator_var.get()
             if fabricator:
                 sql += " WHERE p.delivered_to = ?" if not params else " AND p.delivered_to = ?"
                 params += (fabricator,)
-            sql += " ORDER BY p.date DESC"
-            try:
-                cur.execute(sql, params)
-                rows = cur.fetchall()
-            except sqlite3.Error as e:
-                tk.messagebox.showerror("Database Error", f"Failed to load data: {e}")
-                return
+            sql += " GROUP BY b.status"
+            cur.execute(sql, params)
+            status_data = {row["status"] or "Ordered": (row["batch_count"], row["lot_count"]) for row in cur.fetchall()}
 
-            total_purchases = 0
-            total_kg = 0
-            batch_set = set()
-            fabricator_balances = {}  # Track kg by fabricator
+            total_batches = sum(c[0] for c in status_data.values())
+            total_lots = sum(c[1] for c in status_data.values())
+            for status in self.status_vars:
+                batch_count, lot_count = status_data.get(status, (0, 0))
+                self.status_vars[status].set(f"B: {batch_count} / L: {lot_count}")
+                if total_batches > 0:
+                    progressbar = self.left_frame.winfo_children()[status == "Ordered" and 1 or status == "Knitted" and 2 or status == "Dyed" and 3 or 4].winfo_children()[2]
+                    progressbar["value"] = (batch_count / total_batches) * 100 if total_batches else 0
 
-            for r in rows:
-                display_date = r["date"]
-                try:
-                    display_date = db.db_to_ui_date(r["date"])
-                except:
-                    pass
-                status = r["batch_status"] or "Ordered"
-                returned_kg = r["returned_kg"] or 0
-                shortage_kg = max(0, r["qty_kg"] - returned_kg)  # Simple shortage calculation
-                # Placeholder net price calculation (to be replaced with db.calculate_net_price when available)
-                net_price = r["qty_kg"] * 100 if r["qty_kg"] else 0  # Example: $100 per kg
+            # Summary stats
+            cur.execute("""
+                SELECT COUNT(DISTINCT p.id) AS purchase_count, SUM(p.qty_kg) AS total_kg, COUNT(DISTINCT p.batch_id) AS batch_count
+                FROM purchases p
+            """, params)
+            row = cur.fetchone()
+            self.total_purchases_label.config(text=f"Total Purchases: {row['purchase_count'] or 0}")
+            self.total_yarn_kg_label.config(text=f"Total Yarn (kg): {row['total_kg'] or 0}")
+            self.total_batches_label.config(text=f"Total Batches: {row['batch_count'] or 0}")
 
-                self.tree.insert("", "end", values=(display_date, r["batch_id"], r["lot_no"], r["supplier"], 
-                                                  r["yarn_type"], r["qty_kg"], r["qty_rolls"], r["delivered_to"],
-                                                  status, round(shortage_kg, 2), round(net_price, 2)))
-                total_purchases += 1
-                total_kg += r["qty_kg"] or 0
-                batch_set.add(r["batch_id"])
-                fabricator_balances[r["delivered_to"]] = fabricator_balances.get(r["delivered_to"], 0) + (r["qty_kg"] or 0)
+            # Update chart
+            self.update_chart(status_data, total_batches)
 
-            self.total_purchases_label.config(text=f"Total Purchases: {total_purchases}")
-            self.total_yarn_kg_label.config(text=f"Total Yarn (kg): {total_kg}")
-            self.total_batches_label.config(text=f"Total Batches: {len(batch_set)}")
+    def update_chart(self, status_data, total_batches):
+        if total_batches > 0:
+            chart_text = "\n".join([f"{s}: {'█' * int((c[0]/total_batches)*20) or '▁'} ({c[0]})" for s, c in status_data.items()])
+        else:
+            chart_text = "No data available"
+        self.chart_label.config(text=chart_text)
 
-            # Update fabricator-specific balances (simplified display for now)
-            for fab, kg in fabricator_balances.items():
-                print(f"Fabricator {fab}: {kg} kg")  # Placeholder; consider a dedicated UI element
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = DashboardFrame(root, None)
+    root.mainloop()
