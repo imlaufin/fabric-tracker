@@ -1,4 +1,3 @@
-# reports.py
 import tkinter as tk
 from tkinter import ttk, filedialog
 from openpyxl import Workbook
@@ -23,8 +22,8 @@ class ReportsFrame(ttk.Frame):
         ttk.Button(top, text="Apply", command=self.load_report).grid(row=0, column=2, padx=6)
         ttk.Button(top, text="Export to Excel", command=self.export_report).grid(row=0, column=3, padx=6)
 
-        self.tree = ttk.Treeview(self, columns=("date","batch","supplier","yarn","kg","rolls","delivered"), show="headings")
-        for c, h in zip(("date","batch","supplier","yarn","kg","rolls","delivered"), ["Date","Batch","Supplier","Yarn","Kg","Rolls","Delivered To"]):
+        self.tree = ttk.Treeview(self, columns=("date", "batch", "supplier", "yarn", "kg", "rolls", "delivered"), show="headings")
+        for c, h in zip(("date", "batch", "supplier", "yarn", "kg", "rolls", "delivered"), ["Date", "Batch", "Supplier", "Yarn", "Kg", "Rolls", "Delivered To"]):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=120)
         self.tree.pack(fill="both", expand=True, padx=6, pady=6)
@@ -32,7 +31,7 @@ class ReportsFrame(ttk.Frame):
     def _generate_fy_years(self):
         now = datetime.now().year
         vals = []
-        for y in range(now-5, now+1):
+        for y in range(now - 5, now + 1):
             vals.append(str(y))
         return vals
 
@@ -51,25 +50,30 @@ class ReportsFrame(ttk.Frame):
         fy_end_date = f"{fy_end_year}-03-31"
         for r in self.tree.get_children():
             self.tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT date, batch_id, supplier, yarn_type, qty_kg, qty_rolls, delivered_to
-            FROM purchases
-            WHERE date >= ? AND date <= ?
-            ORDER BY date
-        """, (fy_start_date, fy_end_date))
-        for row in cur.fetchall():
-            self.tree.insert("", "end", values=(row["date"], row["batch_id"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["delivered_to"]))
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT date, batch_id, supplier, yarn_type, qty_kg, qty_rolls, delivered_to
+                FROM purchases
+                WHERE date >= ? AND date <= ?
+                ORDER BY date
+            """, (fy_start_date, fy_end_date))
+            for row in cur.fetchall():
+                display_date = db.db_to_ui_date(row["date"])
+                self.tree.insert("", "end", values=(display_date, row["batch_id"], row["supplier"], row["yarn_type"], row["qty_kg"], row["qty_rolls"], row["delivered_to"]))
+        # No connection.close() needed with context manager
 
     def export_report(self):
-        file_path = filedialog.asksaveasfilename(defaultextension=".xlsx",filetypes=[("Excel","*.xlsx")])
+        file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")])
         if not file_path:
             return
         wb = Workbook()
         ws = wb.active
-        ws.append(["Date","Batch","Supplier","Yarn","Kg","Rolls","Delivered To"])
+        ws.append(["Date", "Batch", "Supplier", "Yarn", "Kg", "Rolls", "Delivered To"])
         for r in self.tree.get_children():
             ws.append(self.tree.item(r)["values"])
         wb.save(file_path)
+
+    def reload_data(self):
+        # Refresh the report with the current financial year
+        self.load_report()
