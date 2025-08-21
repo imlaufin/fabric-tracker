@@ -128,7 +128,9 @@ def init_db():
             composition TEXT,
             status TEXT DEFAULT 'Ordered',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(fabricator_id) REFERENCES suppliers(id)
+            dyeing_unit_id INTEGER,
+            FOREIGN KEY(fabricator_id) REFERENCES suppliers(id),
+            FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id)
         )
         """)
         cur.execute("""
@@ -164,6 +166,13 @@ def init_db():
             cur.execute("ALTER TABLE lots ADD COLUMN weight_kg REAL")
         if "status" not in columns:
             cur.execute("ALTER TABLE lots ADD COLUMN status TEXT DEFAULT 'Ordered'")
+
+        # Migration: Add dyeing_unit_id to batches if not exists
+        cur.execute("PRAGMA table_info(batches)")
+        columns = [row["name"] for row in cur.fetchall()]
+        if "dyeing_unit_id" not in columns:
+            cur.execute("ALTER TABLE batches ADD COLUMN dyeing_unit_id INTEGER")
+            cur.execute("UPDATE batches SET dyeing_unit_id = NULL WHERE dyeing_unit_id IS NULL")
 
         # Helpful indexes
         cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
@@ -398,13 +407,13 @@ def search_batches_prefix(prefix: str, limit: int = 20):
         ).fetchall()]
     return rows
 
-def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composition=""):
+def create_batch(batch_ref, fabricator_id, product_name, expected_lots, composition="", dyeing_unit_id=None):
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO batches (batch_ref, fabricator_id, product_name, expected_lots, composition)
-            VALUES (?, ?, ?, ?, ?)
-        """, (batch_ref, fabricator_id, product_name, expected_lots, composition))
+            INSERT INTO batches (batch_ref, fabricator_id, product_name, expected_lots, composition, dyeing_unit_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (batch_ref, fabricator_id, product_name, expected_lots, composition, dyeing_unit_id))
         bid = cur.lastrowid
         conn.commit()  # Commit batch immediately
         for i in range(1, expected_lots + 1):
@@ -420,8 +429,8 @@ def create_lot(batch_id, lot_index, weight_kg=0):
         batch_ref = row["batch_ref"]
         lot_no = f"{batch_ref}/{lot_index}"
         cur.execute(
-            "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)",
-            (batch_id, lot_no, lot_index, weight_kg)
+            "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg, status) VALUES (?, ?, ?, ?, ?)",
+            (batch_id, lot_no, lot_index, weight_kg, "Ordered")
         )
         conn.commit()  # Commit each lot
         return cur.lastrowid
@@ -465,8 +474,8 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
                 conn.commit()  # Commit batch
                 lot_no = f"{batch_id}/1"
                 cur.execute(
-                    "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg) VALUES (?, ?, ?, ?)",
-                    (bid, lot_no, 1, qty_kg)
+                    "INSERT INTO lots (batch_id, lot_no, lot_index, weight_kg, status) VALUES (?, ?, ?, ?, ?)",
+                    (bid, lot_no, 1, qty_kg, "Ordered")
                 )
                 conn.commit()  # Commit lot
 
@@ -481,13 +490,13 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         if lot_id:
             cur.execute("UPDATE lots SET weight_kg=?, status='Ordered' WHERE id=?", (qty_kg, lot_id))
 
-        # Update batch status
+        # Update batch status based on delivery
         batch_id_int = get_batch_id_by_ref(batch_id)
         if batch_id_int:
             cur.execute("UPDATE batches SET status='Ordered' WHERE id=?", (batch_id_int,))
             if lot_id:
                 cur.execute("UPDATE lots SET status='Ordered' WHERE id=?", (lot_id,))
-            if "Knitting" in delivered_to:
+            if delivered_to and get_supplier_id_by_name(delivered_to, "knitting_unit"):
                 cur.execute("UPDATE batches SET status='Knitted' WHERE id=?", (batch_id_int,))
                 if lot_id:
                     cur.execute("UPDATE lots SET status='Knitted' WHERE id=?", (lot_id,))
@@ -548,14 +557,11 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
         if returned_qty_kg >= 0.9 * weight_kg:
             cur.execute("UPDATE lots SET status='Received' WHERE id=?", (resolved_lot_id,))
             batch_id = cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["batch_id"]
-            cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
-            min_status = cur.fetchone()["min_status"]
-            if min_status == "Received":
-                cur.execute("UPDATE batches SET status='Received' WHERE id=?", (batch_id,))
+            cur.execute("UPDATE batches SET status='Received', dyeing_unit_id=? WHERE id=?", (dyeing_unit_id, batch_id))
         elif returned_qty_kg > 0:
             cur.execute("UPDATE lots SET status='Dyed' WHERE id=?", (resolved_lot_id,))
             batch_id = cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["batch_id"]
-            cur.execute("UPDATE batches SET status='Dyed' WHERE id=?", (batch_id,))
+            cur.execute("UPDATE batches SET status='Dyed', dyeing_unit_id=? WHERE id=?", (dyeing_unit_id, batch_id))
         conn.commit()
 
 def delete_dyeing_output(dyeing_id: int):
