@@ -291,14 +291,18 @@ class EntriesFrame(ttk.Frame):
             rolls = int(self.rolls_e.get().strip() or 0)
             price = float(self.price_e.get().strip() or 0)
         except ValueError:
-            messagebox.showerror("Invalid", "Qty or Price must be numeric")
+            messagebox.showerror("Invalid", "Qty (kg/rolls) or Price must be numeric")
+            return
+
+        if kg <= 0 and rolls <= 0:
+            messagebox.showwarning("Invalid Quantity", "At least one of Qty (kg) or Qty (rolls) must be greater than 0")
             return
 
         self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
 
     def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
-        if not date or not yarn or (kg == 0 and rolls == 0) or not delivered:
-            messagebox.showwarning("Missing", "Please fill required fields")
+        if not date or not yarn or not delivered:
+            messagebox.showwarning("Missing", "Please fill required fields: Date, Yarn Type, Delivered To")
             return
 
         self._snap_autocomplete(self.delivered_cb)
@@ -335,6 +339,11 @@ class EntriesFrame(ttk.Frame):
         self.reload_entries()
         self.clear_purchase_form(keep_defaults=True)
         self.selected_purchase_id = None
+
+        # Notify controller to update statuses
+        if self.controller and hasattr(self.controller, "on_purchase_recorded"):
+            self.controller.on_purchase_recorded(batch, lot, delivered)
+
         if self.controller and hasattr(self.controller, "fabricators_frame"):
             self.controller.fabricators_frame.build_tabs()
 
@@ -469,12 +478,18 @@ class EntriesFrame(ttk.Frame):
             kg = float(self.returned_kg_e.get().strip() or 0)
             rolls = int(self.returned_rolls_e.get().strip() or 0)
         except ValueError:
-            messagebox.showerror("Invalid", "Qty must be numeric")
+            messagebox.showerror("Invalid", "Qty (kg/rolls) must be numeric")
             return
+
+        if kg <= 0 and rolls <= 0:
+            messagebox.showwarning("Invalid Quantity", "At least one of Qty (kg) or Qty (rolls) must be greater than 0")
+            return
+
         notes = self.returned_notes_e.get().strip()
-        if not lot_no or not unit or (kg == 0 and rolls == 0):
-            messagebox.showwarning("Missing", "Please fill required fields")
+        if not lot_no or not unit:
+            messagebox.showwarning("Missing", "Please fill required fields: Lot ID, Dyeing Unit")
             return
+
         conn = db.get_connection()
         cur = conn.cursor()
         cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
@@ -501,6 +516,7 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not assigned to '{unit}' in pending batches.")
             conn.close()
             return
+
         try:
             if self.selected_dyeing_id:
                 cur.execute("""
@@ -514,11 +530,17 @@ class EntriesFrame(ttk.Frame):
             messagebox.showerror("Invalid Date", str(e))
             conn.close()
             return
+
         conn.commit()
         conn.close()
         self.clear_dyeing_form()
         self.selected_dyeing_id = None
         self.reload_dyeing_outputs()
+
+        # Notify controller to update statuses
+        if self.controller and hasattr(self.controller, "on_dyeing_output_recorded"):
+            self.controller.on_dyeing_output_recorded(lot_id)
+
         if self.controller and hasattr(self.controller, "fabricators_frame"):
             self.controller.fabricators_frame.build_tabs()
 
