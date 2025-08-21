@@ -469,6 +469,13 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         if lot_id:
             cur.execute("UPDATE lots SET weight_kg=? WHERE id=?", (qty_kg, lot_id))
 
+        # Update batch and lot status
+        if lot_id:
+            update_lot_status(lot_id, "Ordered")
+        batch_id_int = get_batch_id_by_ref(batch_id)
+        if batch_id_int:
+            update_batch_status(batch_id_int, "Ordered")
+
         conn.commit()
     return purchase_id
 
@@ -516,6 +523,9 @@ def record_dyeing_output(lot_id, dyeing_unit_id, returned_date, returned_qty_kg,
             INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
+        # Update lot status based on completion
+        if returned_qty_kg >= 0.9 * (conn.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,)).fetchone()["weight_kg"] or 0):
+            update_lot_status(resolved_lot_id, "Received")
         conn.commit()
 
 def delete_dyeing_output(dyeing_id: int):
@@ -536,6 +546,8 @@ def update_batch_status(batch_id, status):
     if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
         raise ValueError(f"Invalid status: {status}")
     with get_connection() as conn:
+        # Update all lots under this batch
+        conn.execute("UPDATE lots SET status=? WHERE batch_id=?", (status, batch_id))
         conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
         conn.commit()
 
@@ -544,6 +556,14 @@ def update_lot_status(lot_id, status):
         raise ValueError(f"Invalid status: {status}")
     with get_connection() as conn:
         conn.execute("UPDATE lots SET status=? WHERE id=?", (status, lot_id))
+        # Update batch status if all lots are at or beyond this status
+        cur = conn.cursor()
+        cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
+        batch_id = cur.fetchone()["batch_id"]
+        cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
+        min_status = cur.fetchone()["min_status"]
+        if min_status == status:
+            conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
         conn.commit()
 
 def get_batch_status(batch_id):
@@ -559,10 +579,32 @@ def get_lot_status(lot_id):
 def calculate_net_price(batch_id):
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT SUM(price_per_unit * qty_kg) FROM purchases WHERE batch_id=?", (batch_id,))
-        yarn_cost = cur.fetchone()[0] or 0
-        # Placeholder for knitting/dyeing fees (extend with new table if needed)
-        net_price = yarn_cost  # Add fees later
+        # Yarn cost
+        cur.execute("SELECT SUM(price_per_unit * qty_kg) AS yarn_cost FROM purchases WHERE batch_id=?", (batch_id,))
+        yarn_cost = cur.fetchone()["yarn_cost"] or 0
+
+        # Knitting cost (e.g., $5 per kg for Shiv Fabrics)
+        cur.execute("""
+            SELECT p.delivered_to, SUM(p.qty_kg) AS total_kg
+            FROM purchases p
+            WHERE p.batch_id=? AND p.delivered_to IN ('Shiv Fabrics')
+            GROUP BY p.delivered_to
+        """, (batch_id,))
+        knitting_row = cur.fetchone()
+        knitting_cost = (knitting_row["total_kg"] or 0) * 5 if knitting_row else 0
+
+        # Dyeing cost (e.g., $10 per kg for Oswal Finishing Mills)
+        cur.execute("""
+            SELECT SUM(d.returned_qty_kg) AS dyed_kg
+            FROM dyeing_outputs d
+            JOIN lots l ON d.lot_id = l.id
+            JOIN batches b ON l.batch_id = b.id
+            WHERE b.id=? AND d.dyeing_unit_id = (SELECT id FROM suppliers WHERE name='Oswal Finishing Mills' LIMIT 1)
+        """, (batch_id,))
+        dyeing_row = cur.fetchone()
+        dyeing_cost = (dyeing_row["dyed_kg"] or 0) * 10 if dyeing_row else 0
+
+        net_price = yarn_cost + knitting_cost + dyeing_cost
     return net_price
 
 # ----------------------------
