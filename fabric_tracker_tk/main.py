@@ -60,7 +60,7 @@ class FabricTrackerApp(tk.Tk):
                     SELECT DISTINCT b.id
                     FROM batches b
                     JOIN purchases p ON b.batch_ref = p.batch_id
-                    WHERE p.delivered_to LIKE '%Knitting%'
+                    JOIN suppliers s ON s.name = p.delivered_to AND s.type = 'knitting_unit'
                 )
             """)
             cur.execute("""
@@ -70,7 +70,7 @@ class FabricTrackerApp(tk.Tk):
                     SELECT DISTINCT b.id
                     FROM batches b
                     JOIN purchases p ON b.batch_ref = p.batch_id
-                    WHERE p.delivered_to LIKE '%Knitting%'
+                    JOIN suppliers s ON s.name = p.delivered_to AND s.type = 'knitting_unit'
                 )
             """)
             cur.execute("""
@@ -81,6 +81,7 @@ class FabricTrackerApp(tk.Tk):
                     FROM batches b
                     JOIN lots l ON b.id = l.batch_id
                     JOIN dyeing_outputs d ON l.id = d.lot_id
+                    WHERE d.returned_qty_kg > 0
                 )
             """)
             cur.execute("""
@@ -90,6 +91,7 @@ class FabricTrackerApp(tk.Tk):
                     SELECT DISTINCT l.id
                     FROM lots l
                     JOIN dyeing_outputs d ON l.id = d.lot_id
+                    WHERE d.returned_qty_kg > 0
                 )
             """)
             cur.execute("""
@@ -100,7 +102,7 @@ class FabricTrackerApp(tk.Tk):
                     FROM batches b
                     JOIN lots l ON b.id = l.batch_id
                     JOIN dyeing_outputs d ON l.id = d.lot_id
-                    WHERE d.returned_qty_kg > 0
+                    WHERE d.returned_qty_kg >= 0.9 * l.weight_kg
                 )
             """)
             cur.execute("""
@@ -110,21 +112,22 @@ class FabricTrackerApp(tk.Tk):
                     SELECT DISTINCT l.id
                     FROM lots l
                     JOIN dyeing_outputs d ON l.id = d.lot_id
-                    WHERE d.returned_qty_kg > 0
+                    WHERE d.returned_qty_kg >= 0.9 * l.weight_kg
                 )
             """)
-            # Set "Pending" for lots/batches with no dyeing output
+            # Set "Ordered" for lots/batches with purchases but no further processing
             cur.execute("""
                 UPDATE lots
-                SET status='Pending'
-                WHERE status NOT IN ('Knitted', 'Dyed', 'Received')
-                AND id NOT IN (SELECT lot_id FROM dyeing_outputs)
+                SET status='Ordered'
+                WHERE batch_id IN (
+                    SELECT id FROM batches WHERE id IN (SELECT DISTINCT batch_id FROM purchases)
+                ) AND status NOT IN ('Knitted', 'Dyed', 'Received')
             """)
             cur.execute("""
                 UPDATE batches
-                SET status='Pending'
-                WHERE status NOT IN ('Knitted', 'Dyed', 'Received')
-                AND id NOT IN (SELECT batch_id FROM lots WHERE id IN (SELECT lot_id FROM dyeing_outputs))
+                SET status='Ordered'
+                WHERE id IN (SELECT DISTINCT batch_id FROM purchases)
+                AND status NOT IN ('Knitted', 'Dyed', 'Received')
             """)
             conn.commit()
 
@@ -145,16 +148,19 @@ class FabricTrackerApp(tk.Tk):
         if batch_id and delivered_to:
             batch_id_int = db.get_batch_id_by_ref(batch_id)
             if batch_id_int:
-                db.update_batch_status(batch_id_int, "Ordered")
-                if lot_no:
-                    lot_id = db.get_lot_id_by_no(lot_no)
-                    if lot_id:
-                        db.update_lot_status(lot_id, "Ordered")
-            if "Knitting" in delivered_to:
-                if batch_id_int:
+                knitting_id = db.get_supplier_id_by_name(delivered_to, "knitting_unit")
+                if knitting_id:
                     db.update_batch_status(batch_id_int, "Knitted")
-                    if lot_id:
-                        db.update_lot_status(lot_id, "Knitted")
+                    if lot_no:
+                        lot_id = db.get_lot_id_by_no(lot_no)
+                        if lot_id:
+                            db.update_lot_status(lot_id, "Knitted")
+                else:
+                    db.update_batch_status(batch_id_int, "Ordered")
+                    if lot_no:
+                        lot_id = db.get_lot_id_by_no(lot_no)
+                        if lot_id:
+                            db.update_lot_status(lot_id, "Ordered")
         self.update_all_statuses()
 
     def on_dyeing_output_recorded(self, lot_id):
@@ -164,9 +170,18 @@ class FabricTrackerApp(tk.Tk):
                 cur = conn.cursor()
                 cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
                 batch_id = cur.fetchone()["batch_id"]
-            if batch_id:
-                db.update_lot_status(lot_id, "Dyed")
-                db.update_batch_status(batch_id, "Dyed")
+                cur.execute("SELECT weight_kg FROM lots WHERE id=?", (lot_id,))
+                weight_kg = cur.fetchone()["weight_kg"] or 0
+                cur.execute("SELECT returned_qty_kg FROM dyeing_outputs WHERE lot_id=? ORDER BY id DESC LIMIT 1", (lot_id,))
+                returned_kg = cur.fetchone()["returned_qty_kg"] or 0
+                if returned_kg > 0 and returned_kg < 0.9 * weight_kg:
+                    db.update_lot_status(lot_id, "Dyed")
+                    if batch_id:
+                        db.update_batch_status(batch_id, "Dyed")
+                elif returned_kg >= 0.9 * weight_kg:
+                    db.update_lot_status(lot_id, "Received")
+                    if batch_id:
+                        db.update_batch_status(batch_id, "Received")
             self.update_all_statuses()
 
 if __name__ == "__main__":
