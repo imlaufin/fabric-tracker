@@ -76,7 +76,7 @@ class EntriesFrame(ttk.Frame):
         self.notebook.add(self.tab_purchases, text="Purchases")
         self.build_purchase_form(self.tab_purchases)
         self.build_purchase_table(self.tab_purchases)
-        self.tab_dyeing = ttk.Frame(self.tab_purchases)
+        self.tab_dyeing = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_dyeing, text="Dyeing Outputs")
         self.build_dyeing_form(self.tab_dyeing)
         self.build_dyeing_table(self.tab_dyeing)
