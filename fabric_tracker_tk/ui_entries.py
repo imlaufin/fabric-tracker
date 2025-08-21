@@ -267,16 +267,15 @@ class EntriesFrame(ttk.Frame):
     def reload_entries(self):
         for r in self.tree.get_children():
             self.tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM purchases ORDER BY date DESC")
-        for row in cur.fetchall():
-            display_date = db.db_to_ui_date(row["date"])
-            self.tree.insert("", "end", iid=row["id"], values=(
-                display_date, row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"],
-                row["qty_kg"], row["qty_rolls"], row["price_per_unit"], row["delivered_to"]
-            ))
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM purchases ORDER BY date DESC")
+            for row in cur.fetchall():
+                display_date = db.db_to_ui_date(row["date"])
+                self.tree.insert("", "end", iid=row["id"], values=(
+                    display_date, row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"],
+                    row["qty_kg"], row["qty_rolls"], row["price_per_unit"], row["delivered_to"]
+                ))
 
     def save_purchase(self):
         date = self.date_e.get().strip()
@@ -388,20 +387,21 @@ class EntriesFrame(ttk.Frame):
         cur = conn.cursor()
         cur.execute("SELECT id, expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
         row = cur.fetchone()
+        fabricator_name = self.delivered_cb.get().strip()
+        fabricator_id = db.get_supplier_id_by_name(fabricator_name, "knitting_unit")
+        if not row and not fabricator_id:
+            messagebox.showerror("Invalid Fabricator", f"Fabricator '{fabricator_name}' not found or not a knitting unit.")
+            conn.close()
+            return
         if not row:
-            fabricator_name = self.delivered_cb.get().strip()
-            cur.execute("SELECT id FROM suppliers WHERE name=?", (fabricator_name,))
-            fr = cur.fetchone()
-            fid = fr["id"] if fr else None
-            if messagebox.askyesno("Batch not found", "Batch not found. Create new batch?"):
-                b_id = db.create_batch(batch_ref, fid, "", 0, "")
+            if messagebox.askyesno("Batch not found", f"Batch '{batch_ref}' not found. Create new batch for '{fabricator_name}' with 1 lot?"):
+                db.create_batch(batch_ref, fabricator_id, "", 1, "")
             else:
                 conn.close()
                 return
-        else:
-            b_id = row["id"]
+        b_id = row["id"] if row else db.get_batch_id_by_ref(batch_ref)
         try:
-            lots = int(simpledialog.askstring("Lots", "How many lots to create?", parent=self) or "0")
+            lots = int(simpledialog.askstring("Lots", f"How many lots to create for batch '{batch_ref}'?\n(Each lot will be numbered sequentially, e.g., {batch_ref}/1, {batch_ref}/2)", parent=self) or "0")
         except ValueError:
             lots = 0
         if lots <= 0:
@@ -410,20 +410,22 @@ class EntriesFrame(ttk.Frame):
         cur.execute("SELECT MAX(lot_index) as maxidx FROM lots WHERE batch_id=?", (b_id,))
         maxidx = cur.fetchone()["maxidx"] or 0
         for i in range(1, lots + 1):
-            db.create_lot(b_id, maxidx + i)
+            db.create_lot(b_id, maxidx + i, 0)  # Default weight_kg=0
         conn.close()
-        messagebox.showinfo("Done", f"{lots} lots created for batch {batch_ref}.")
+        messagebox.showinfo("Done", f"{lots} lots created for batch '{batch_ref}' with initial status 'Pending'.")
+        self.refresh_lists()  # Auto-refresh to update lot options
+        if self.controller and hasattr(self.controller, "on_purchase_recorded"):
+            self.controller.on_purchase_recorded(batch_ref, f"{batch_ref}/{maxidx + 1}", fabricator_name)  # Trigger status update
 
     def on_purchase_double_click(self, event):
         item = self.tree.selection()
         if not item:
             return
         purchase_id = int(item[0])
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,))
-        row = cur.fetchone()
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM purchases WHERE id=?", (purchase_id,))
+            row = cur.fetchone()
         if not row:
             return
         self.selected_purchase_id = purchase_id
@@ -454,21 +456,20 @@ class EntriesFrame(ttk.Frame):
     def reload_dyeing_outputs(self):
         for r in self.dye_tree.get_children():
             self.dye_tree.delete(r)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT d.id, l.lot_no as lot_id, s.name as unit, d.returned_date, d.returned_qty_kg, d.returned_qty_rolls, d.notes
-            FROM dyeing_outputs d
-            LEFT JOIN lots l ON d.lot_id = l.id
-            LEFT JOIN suppliers s ON d.dyeing_unit_id = s.id
-            ORDER BY d.returned_date DESC
-        """)
-        for row in cur.fetchall():
-            display_date = db.db_to_ui_date(row["returned_date"])
-            self.dye_tree.insert("", "end", iid=row["id"], values=(
-                row["lot_id"], row["unit"], display_date, row["returned_qty_kg"], row["returned_qty_rolls"], row["notes"]
-            ))
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT d.id, l.lot_no as lot_id, s.name as unit, d.returned_date, d.returned_qty_kg, d.returned_qty_rolls, d.notes
+                FROM dyeing_outputs d
+                LEFT JOIN lots l ON d.lot_id = l.id
+                LEFT JOIN suppliers s ON d.dyeing_unit_id = s.id
+                ORDER BY d.returned_date DESC
+            """)
+            for row in cur.fetchall():
+                display_date = db.db_to_ui_date(row["returned_date"])
+                self.dye_tree.insert("", "end", iid=row["id"], values=(
+                    row["lot_id"], row["unit"], display_date, row["returned_qty_kg"], row["returned_qty_rolls"], row["notes"]
+                ))
 
     def save_dyeing(self):
         lot_no = self.dyeing_lot_e.get().strip()
@@ -490,49 +491,48 @@ class EntriesFrame(ttk.Frame):
             messagebox.showwarning("Missing", "Please fill required fields: Lot ID, Dyeing Unit")
             return
 
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
-        row = cur.fetchone()
-        if not row:
-            messagebox.showerror("Invalid Unit", f"Dyeing unit '{unit}' not found")
-            conn.close()
-            return
-        unit_id = row["id"]
-        # Cross-reference lot_no with existing lots
-        lot_id = db.get_lot_id_by_no(lot_no)
-        if lot_id is None:
-            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Please use a lot number from the 'Pending Batches' list.")
-            conn.close()
-            return
-        # Verify the lot is associated with this dyeing unit's pending batches
-        cur.execute("""
-            SELECT p.batch_id, p.lot_no
-            FROM purchases p
-            WHERE p.lot_no = ? AND p.delivered_to = ?
-        """, (lot_no, unit))
-        pending_lot = cur.fetchone()
-        if not pending_lot:
-            messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not assigned to '{unit}' in pending batches.")
-            conn.close()
-            return
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
+            row = cur.fetchone()
+            if not row:
+                messagebox.showerror("Invalid Unit", f"Dyeing unit '{unit}' not found")
+                return
+            unit_id = row["id"]
+            # Cross-reference lot_no with existing lots and ensure it's valid
+            lot_id = db.get_lot_id_by_no(lot_no)
+            if lot_id is None:
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Create it via the 'Purchases' tab first.")
+                return
+            # Verify the lot is associated with this dyeing unit's pending batches
+            cur.execute("""
+                SELECT p.batch_id, p.lot_no
+                FROM purchases p
+                WHERE p.lot_no = ? AND p.delivered_to = ?
+            """, (lot_no, unit))
+            pending_lot = cur.fetchone()
+            if not pending_lot:
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not assigned to '{unit}' in pending batches.")
+                return
 
-        try:
-            if self.selected_dyeing_id:
-                cur.execute("""
-                    UPDATE dyeing_outputs
-                    SET lot_id=?, dyeing_unit_id=?, returned_date=?, returned_qty_kg=?, returned_qty_rolls=?, notes=?
-                    WHERE id=?
-                """, (lot_id, unit_id, db.ui_to_db_date(returned_date), kg, rolls, notes, self.selected_dyeing_id))
-            else:
-                db.record_dyeing_output(lot_id, unit_id, returned_date, kg, rolls, notes)
-        except ValueError as e:
-            messagebox.showerror("Invalid Date", str(e))
-            conn.close()
-            return
+            try:
+                if self.selected_dyeing_id:
+                    cur.execute("""
+                        UPDATE dyeing_outputs
+                        SET lot_id=?, dyeing_unit_id=?, returned_date=?, returned_qty_kg=?, returned_qty_rolls=?, notes=?
+                        WHERE id=?
+                    """, (lot_id, unit_id, db.ui_to_db_date(returned_date), kg, rolls, notes, self.selected_dyeing_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (lot_id, unit_id, db.ui_to_db_date(returned_date), kg, rolls, notes))
+            except ValueError as e:
+                messagebox.showerror("Invalid Date", str(e))
+                return
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+
         self.clear_dyeing_form()
         self.selected_dyeing_id = None
         self.reload_dyeing_outputs()
@@ -559,20 +559,18 @@ class EntriesFrame(ttk.Frame):
         if not item:
             return
         dyeing_id = int(item[0])
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT d.*, s.name as unit_name FROM dyeing_outputs d LEFT JOIN suppliers s ON d.dyeing_unit_id=s.id WHERE d.id=?", (dyeing_id,))
-        row = cur.fetchone()
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT d.*, s.name as unit_name FROM dyeing_outputs d LEFT JOIN suppliers s ON d.dyeing_unit_id=s.id WHERE d.id=?", (dyeing_id,))
+            row = cur.fetchone()
         if not row:
             return
         self.selected_dyeing_id = dyeing_id
         self.dyeing_lot_e.delete(0, tk.END)
-        conn = db.get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
-        lot_row = cur.fetchone()
-        conn.close()
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
+            lot_row = cur.fetchone()
         if lot_row:
             self.dyeing_lot_e.insert(0, lot_row["lot_no"])
         self.dyeing_unit_cb.set(row["unit_name"])
