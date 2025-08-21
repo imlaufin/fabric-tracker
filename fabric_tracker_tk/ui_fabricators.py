@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from fabric_tracker_tk import db
 from datetime import datetime
 
-SHORTAGE_THRESHOLD_PERCENT = 5.0  # highlight threshold for general shortages
+SHORTAGE_THRESHOLD_PERCENT = 5.0  # Highlight threshold for general shortages
 DYEING_COMPLETION_THRESHOLD = 0.9  # 90% weight for completion
 DYEING_SHORTAGE_HIGHLIGHT = 10.0  # Highlight if shortage >10%
 
@@ -62,7 +62,7 @@ class KnittingTab(ttk.Frame):
 
         cols = ("date", "supplier", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
         self.tx_tree = ttk.Treeview(tx_frame, columns=cols, show="headings", height=8)
-        for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Supplier","Type","Kg","Rolls","Batch","Lot"]):
+        for c, w, h in zip(cols, [100, 150, 150, 90, 90, 90, 120], ["Date", "Supplier", "Type", "Kg", "Rolls", "Batch", "Lot"]):
             self.tx_tree.heading(c, text=h)
             self.tx_tree.column(c, width=w)
         self.tx_tree.pack(fill="both", expand=True)
@@ -73,7 +73,7 @@ class KnittingTab(ttk.Frame):
 
         cols = ("date", "delivered_to", "yarn_type", "qty_kg", "qty_rolls", "batch_id", "lot_no")
         self.out_tx_tree = ttk.Treeview(out_tx_frame, columns=cols, show="headings", height=8)
-        for c, w, h in zip(cols, [100,150,150,90,90,90,120], ["Date","Delivered To","Type","Kg","Rolls","Batch","Lot"]):
+        for c, w, h in zip(cols, [100, 150, 150, 90, 90, 90, 120], ["Date", "Delivered To", "Type", "Kg", "Rolls", "Batch", "Lot"]):
             self.out_tx_tree.heading(c, text=h)
             self.out_tx_tree.column(c, width=w)
         self.out_tx_tree.pack(fill="both", expand=True)
@@ -140,14 +140,19 @@ class KnittingTab(ttk.Frame):
             self.batch_tree.delete(r)
         with db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM batches WHERE fabricator_id=? ORDER BY created_at DESC", (self.fabricator["id"],))
-            for b in cur.fetchall():
-                cur.execute("SELECT COUNT(DISTINCT lot_no) as cnt FROM purchases WHERE batch_id=? AND delivered_to=?", (b["batch_ref"], self.fabricator["name"]))
-                delivered = cur.fetchone()["cnt"] or 0
-                expected = b["expected_lots"] or 0
+            cur.execute("""
+                SELECT b.id, b.batch_ref, b.product_name, b.expected_lots, b.status,
+                       (SELECT COUNT(*) FROM lots WHERE batch_id = b.id AND status = 'Received') as delivered_lots,
+                       (SELECT COUNT(*) FROM lots WHERE batch_id = b.id) as total_lots
+                FROM batches b
+                WHERE b.fabricator_id = ? AND b.batch_ref NOT LIKE 'BATCH_%'
+                ORDER BY b.created_at DESC
+            """, (self.fabricator["id"],))
+            for row in cur.fetchall():
+                expected = row["expected_lots"] if row["expected_lots"] else row["total_lots"]
+                delivered = row["delivered_lots"] or 0
                 pending = max(0, expected - delivered)
-                status = b["status"]  # Use the status from the database
-                self.batch_tree.insert("", "end", values=(b["batch_ref"], b["product_name"], expected, delivered, pending, status))
+                self.batch_tree.insert("", "end", values=(row["batch_ref"], row["product_name"], expected, delivered, pending, row["status"]))
 
     def on_batch_double(self, event):
         sel = self.batch_tree.selection()
