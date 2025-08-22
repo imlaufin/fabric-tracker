@@ -129,18 +129,21 @@ class MastersFrame(ttk.Frame):
         self.fabric_tree.bind("<Button-3>", self.show_fabric_context_menu)
 
     def build_composition_ui(self, parent):
+        # Fabric Type Selection
         ttk.Label(parent, text="Fabric Type:").grid(row=0, column=0, sticky="w")
         self.comp_fabric_cb = ttk.Combobox(parent, values=db.list_fabric_types(), state="readonly", width=20)
         self.comp_fabric_cb.grid(row=0, column=1, padx=5)
         self.comp_fabric_cb.bind("<<ComboboxSelected>>", self.load_composition)
 
-        ttk.Label(parent, text="Yarn Type:").grid(row=0, column=2, sticky="w")
-        self.comp_yarn_cb = ttk.Combobox(parent, values=db.list_yarn_types(), state="readonly", width=20)
-        self.comp_yarn_cb.grid(row=0, column=3, padx=5)
+        # Composition Fields
+        ttk.Label(parent, text="Component:").grid(row=0, column=2, sticky="w")
+        self.comp_component_cb = ttk.Combobox(parent, values=["Main Fabric", "Rib", "Collar"], state="readonly", width=12)
+        self.comp_component_cb.grid(row=0, column=3, padx=5)
+        self.comp_component_cb.current(0)
 
-        ttk.Label(parent, text="Quantity (kg):").grid(row=0, column=4, sticky="w")
-        self.quantity_entry = ttk.Entry(parent, width=10)
-        self.quantity_entry.grid(row=0, column=5, padx=5)
+        ttk.Label(parent, text="Yarn Type:").grid(row=0, column=4, sticky="w")
+        self.comp_yarn_cb = ttk.Combobox(parent, values=db.list_yarn_types(), state="readonly", width=20)
+        self.comp_yarn_cb.grid(row=0, column=5, padx=5)
 
         ttk.Label(parent, text="Ratio:").grid(row=0, column=6, sticky="w")
         self.ratio_entry = ttk.Entry(parent, width=10)
@@ -149,12 +152,12 @@ class MastersFrame(ttk.Frame):
         ttk.Button(parent, text="Add / Update Composition", command=self.add_or_update_composition).grid(row=0, column=8, padx=5)
         ttk.Button(parent, text="Delete Composition", command=self.delete_composition).grid(row=0, column=9, padx=5)
 
-        self.comp_tree = ttk.Treeview(parent, columns=("yarn_type", "quantity", "ratio"), show="headings", height=5)
+        self.comp_tree = ttk.Treeview(parent, columns=("component", "yarn_type", "ratio"), show="headings", height=5)
+        self.comp_tree.heading("component", text="Component")
         self.comp_tree.heading("yarn_type", text="Yarn Type")
-        self.comp_tree.heading("quantity", text="Quantity (kg)")
         self.comp_tree.heading("ratio", text="Ratio")
+        self.comp_tree.column("component", width=100)
         self.comp_tree.column("yarn_type", width=150)
-        self.comp_tree.column("quantity", width=100)
         self.comp_tree.column("ratio", width=100)
         self.comp_tree.grid(row=1, column=0, columnspan=10, padx=5, pady=5, sticky="ew")
 
@@ -303,25 +306,27 @@ class MastersFrame(ttk.Frame):
     def load_composition(self, event=None):
         fabric_name = self.comp_fabric_cb.get()
         if not fabric_name:
+            for r in self.comp_tree.get_children():
+                self.comp_tree.delete(r)
             return
         self.selected_fabric = fabric_name
         for r in self.comp_tree.get_children():
             self.comp_tree.delete(r)
         compositions = db.get_fabric_yarn_composition(fabric_name)
         for comp in compositions:
-            self.comp_tree.insert("", "end", values=(comp["yarn_type"], comp["quantity"], comp["ratio"]))
+            self.comp_tree.insert("", "end", values=(comp["component"], comp["yarn_type"], comp["ratio"]))
 
     def add_or_update_composition(self):
         fabric_name = self.comp_fabric_cb.get()
+        component = self.comp_component_cb.get()
         yarn_name = self.comp_yarn_cb.get()
-        quantity = float(self.quantity_entry.get()) if self.quantity_entry.get().strip() else 0.0
         ratio = float(self.ratio_entry.get()) if self.ratio_entry.get().strip() else 0.0
-        if not fabric_name or not yarn_name or quantity <= 0 or ratio <= 0:
-            messagebox.showwarning("Missing", "All fields (Fabric, Yarn, Quantity, Ratio) are required and must be positive.")
+        if not fabric_name or not yarn_name or ratio <= 0 or ratio > 100:
+            messagebox.showwarning("Missing", "All fields (Fabric, Component, Yarn, Ratio) are required, and Ratio must be between 0 and 100.")
             return
         try:
-            db.add_fabric_yarn_composition(fabric_name, yarn_name, quantity, ratio)
-            messagebox.showinfo("Saved", f"Composition for {fabric_name} updated.")
+            db.add_fabric_yarn_composition(fabric_name, yarn_name, ratio, component)
+            messagebox.showinfo("Saved", f"Composition for {fabric_name} ({component}) updated.")
             self.load_composition()
             if self.on_change_callback:
                 self.on_change_callback()
@@ -332,17 +337,18 @@ class MastersFrame(ttk.Frame):
         selected = self.comp_tree.selection()
         if not selected:
             return
-        yarn_type = self.comp_tree.item(selected[0])["values"][0]
+        component, yarn_type, _ = self.comp_tree.item(selected[0])["values"]
         fabric_name = self.comp_fabric_cb.get()
-        if messagebox.askyesno("Confirm", f"Delete composition for {yarn_type} from {fabric_name}?"):
-            # Note: SQLite doesn't support direct deletion by name; you'd need to fetch IDs
+        if messagebox.askyesno("Confirm", f"Delete {component} composition for {yarn_type} from {fabric_name}?"):
             with db.get_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT id FROM fabric_yarn_composition WHERE fabric_type_id = (SELECT id FROM fabric_types WHERE name = ?) AND yarn_type_id = (SELECT id FROM yarn_types WHERE name = ?)", (fabric_name, yarn_type))
-                comp_id = cur.fetchone()
-                if comp_id:
-                    cur.execute("DELETE FROM fabric_yarn_composition WHERE id = ?", (comp_id["id"],))
-                    conn.commit()
+                cur.execute("""
+                    DELETE FROM fabric_yarn_composition
+                    WHERE fabric_type_id = (SELECT id FROM fabric_types WHERE name = ?)
+                    AND yarn_type_id = (SELECT id FROM yarn_types WHERE name = ?)
+                    AND component = ?
+                """, (fabric_name, yarn_type, component))
+                conn.commit()
             self.load_composition()
             if self.on_change_callback:
                 self.on_change_callback()
