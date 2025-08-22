@@ -409,48 +409,45 @@ class EntriesFrame(ttk.Frame):
         lots_e = ttk.Entry(dialog, width=30)
         lots_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Label(dialog, text="Product Name:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
-        product_e = ttk.Entry(dialog, width=30)
-        product_e.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        ttk.Label(dialog, text="Fabric Type:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        fabric_cb = AutocompleteCombobox(dialog, width=30)
+        fabric_cb.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        fabric_types = db.list_fabric_types()
+        fabric_cb.set_completion_list(fabric_types)
 
-        ttk.Label(dialog, text="Fabric Name:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
-        fabric_e = ttk.Entry(dialog, width=30)
-        fabric_e.grid(row=3, column=1, padx=5, pady=5, sticky="w")
-
-        ttk.Label(dialog, text="Has Rib?").grid(row=4, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(dialog, text="Has Rib?").grid(row=3, column=0, padx=5, pady=5, sticky="e")
         rib_var = tk.StringVar(value="No")
-        ttk.Radiobutton(dialog, text="Yes", variable=rib_var, value="Yes").grid(row=4, column=1, sticky="w")
-        ttk.Radiobutton(dialog, text="No", variable=rib_var, value="No").grid(row=4, column=1, sticky="e", padx=5)
+        ttk.Radiobutton(dialog, text="Yes", variable=rib_var, value="Yes").grid(row=3, column=1, sticky="w")
+        ttk.Radiobutton(dialog, text="No", variable=rib_var, value="No").grid(row=3, column=1, sticky="e", padx=5)
 
-        ttk.Label(dialog, text="Has Collar?").grid(row=5, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(dialog, text="Has Collar?").grid(row=4, column=0, padx=5, pady=5, sticky="e")
         collar_var = tk.StringVar(value="No")
-        ttk.Radiobutton(dialog, text="Yes", variable=collar_var, value="Yes").grid(row=5, column=1, sticky="w")
-        ttk.Radiobutton(dialog, text="No", variable=collar_var, value="No").grid(row=5, column=1, sticky="e", padx=5)
+        ttk.Radiobutton(dialog, text="Yes", variable=collar_var, value="Yes").grid(row=4, column=1, sticky="w")
+        ttk.Radiobutton(dialog, text="No", variable=collar_var, value="No").grid(row=4, column=1, sticky="e", padx=5)
 
-        ttk.Label(dialog, text="Knitting Unit:").grid(row=6, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(dialog, text="Knitting Unit:").grid(row=5, column=0, padx=5, pady=5, sticky="e")
         knitting_cb = AutocompleteCombobox(dialog, width=30)
-        knitting_cb.grid(row=6, column=1, padx=5, pady=5, sticky="w")
+        knitting_cb.grid(row=5, column=1, padx=5, pady=5, sticky="w")
         knitting_units = [r["name"] for r in db.list_suppliers("knitting_unit")]
         knitting_cb.set_completion_list(knitting_units)
 
-        ttk.Label(dialog, text="Dyeing Unit:").grid(row=7, column=0, padx=5, pady=5, sticky="e")
+        ttk.Label(dialog, text="Dyeing Unit:").grid(row=6, column=0, padx=5, pady=5, sticky="e")
         dyeing_cb = AutocompleteCombobox(dialog, width=30)
-        dyeing_cb.grid(row=7, column=1, padx=5, pady=5, sticky="w")
+        dyeing_cb.grid(row=6, column=1, padx=5, pady=5, sticky="w")
         dyeing_units = [r["name"] for r in db.list_suppliers("dyeing_unit")]
         dyeing_cb.set_completion_list(dyeing_units)
 
         def save_batch():
             batch_num = batch_e.get().strip()
             lots = lots_e.get().strip()
-            product = product_e.get().strip()
-            fabric = fabric_e.get().strip()
+            fabric_type = fabric_cb.get().strip()
             has_rib = rib_var.get()
             has_collar = collar_var.get()
             knitting_unit = knitting_cb.get().strip()
             dyeing_unit = dyeing_cb.get().strip()
 
-            if not batch_num or not lots or not knitting_unit:
-                messagebox.showwarning("Missing Fields", "Batch Number, Number of Lots, and Knitting Unit are required.")
+            if not batch_num or not lots or not knitting_unit or not fabric_type:
+                messagebox.showwarning("Missing Fields", "Batch Number, Number of Lots, Knitting Unit, and Fabric Type are required.")
                 return
 
             try:
@@ -471,16 +468,21 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Unit", f"Dyeing unit '{dyeing_unit}' not found.")
                 return
 
+            fabric_type_id = db.get_fabric_type_id_by_name(fabric_type)
+            if not fabric_type_id:
+                messagebox.showerror("Invalid Fabric", f"Fabric type '{fabric_type}' not found.")
+                return
+
             composition = f"Rib: {has_rib}, Collar: {has_collar}"
-            db.create_batch(batch_num, knitting_id, product, lots_int, composition, dyeing_id)
+            db.create_batch(batch_num, knitting_id, fabric_type_id, lots_int, composition, dyeing_id)
             messagebox.showinfo("Success", f"Batch '{batch_num}' created with {lots_int} lots.")
             dialog.destroy()
             self.refresh_lists()
             if self.controller and hasattr(self.controller, "fabricators_frame"):
                 self.controller.fabricators_frame.build_tabs()
 
-        ttk.Button(dialog, text="Save", command=save_batch).grid(row=8, column=0, columnspan=2, pady=10)
-        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=9, column=0, columnspan=2, pady=5)
+        ttk.Button(dialog, text="Save", command=save_batch).grid(row=7, column=0, columnspan=2, pady=10)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=8, column=0, columnspan=2, pady=5)
 
     def reload_dyeing_outputs(self):
         for r in self.dye_tree.get_children():
@@ -528,24 +530,48 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Unit", f"Dyeing unit '{unit}' not found")
                 return
             unit_id = row["id"]
-            # Cross-reference lot_no with existing lots and ensure it's valid
             lot_id = db.get_lot_id_by_no(lot_no)
             if lot_id is None:
                 messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' does not exist. Create it via the 'Create Batch' dialog first.")
                 return
-            # Verify the lot is associated with this dyeing unit's pending batches
-            cur.execute("""
-                SELECT p.batch_id, p.lot_no
-                FROM purchases p
-                JOIN lots l ON l.lot_no = p.lot_no
-                JOIN batches b ON b.id = l.batch_id
-                WHERE p.lot_no = ? AND l.status IN ('Knitted', 'Dyed') AND (b.dyeing_unit_id = ? OR b.dyeing_unit_id IS NULL)
-            """, (lot_no, unit_id))
-            pending_lot = cur.fetchone()
-            if not pending_lot:
-                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not in a valid state for dyeing (must be Knitted or Dyed) or not assigned to dyeing unit '{unit}'.")
-                return
 
+            # Fetch batch and fabric type to validate yarn composition
+            cur.execute("""
+                SELECT b.id AS batch_id, b.fabric_type_id
+                FROM lots l
+                JOIN batches b ON l.batch_id = b.id
+                WHERE l.lot_no = ?
+            """, (lot_no,))
+            batch_row = cur.fetchone()
+            if not batch_row:
+                messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not associated with any batch.")
+                return
+            batch_id = batch_row["batch_id"]
+            fabric_type_id = batch_row["fabric_type_id"]
+
+            # Validate yarn quantity against fabric composition
+            cur.execute("""
+                SELECT yc.yarn_type, yc.ratio
+                FROM fabric_yarn_composition yc
+                WHERE yc.fabric_type_id = ?
+            """, (fabric_type_id,))
+            compositions = cur.fetchall()
+            if not compositions:
+                messagebox.showwarning("No Composition", f"No yarn composition defined for the fabric type of batch '{batch_id}'. Proceed with caution.")
+            else:
+                total_purchased_kg = 0
+                cur.execute("SELECT SUM(qty_kg) AS total FROM purchases WHERE batch_id = ? AND lot_no = ?", (db.get_batch_ref_by_id(batch_id), lot_no))
+                total_purchased_kg_row = cur.fetchone()
+                total_purchased_kg = total_purchased_kg_row["total"] or 0
+                for comp in compositions:
+                    yarn_type = comp["yarn_type"]
+                    ratio = comp["ratio"]
+                    expected_kg = total_purchased_kg * (ratio / 100)
+                    if kg > expected_kg:
+                        messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg}) for yarn '{yarn_type}' based on composition.")
+                        return
+
+            # Record dyeing output with yarn reduction
             try:
                 if self.selected_dyeing_id:
                     cur.execute("""
@@ -558,6 +584,8 @@ class EntriesFrame(ttk.Frame):
                         INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
                         VALUES (?, ?, ?, ?, ?, ?)
                     """, (lot_id, unit_id, db.ui_to_db_date(returned_date), kg, rolls, notes))
+                    dyeing_id = cur.lastrowid
+                    db.record_dyeing_output(dyeing_id, lot_id)  # Trigger yarn reduction
             except ValueError as e:
                 messagebox.showerror("Invalid Date", str(e))
                 return
