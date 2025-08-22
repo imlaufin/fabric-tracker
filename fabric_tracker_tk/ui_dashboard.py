@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from fabric_tracker_tk import db
 from datetime import datetime
 
@@ -17,6 +17,7 @@ class DashboardFrame(ttk.Frame):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
 
         # Left Panel: Status Overview
         self.left_frame = ttk.Frame(self)
@@ -80,6 +81,115 @@ class DashboardFrame(ttk.Frame):
         self.total_batches_label = ttk.Label(self.summary_frame, text="Total Batches: 0", font=("Arial", 12))
         self.total_batches_label.pack(side="left", padx=6)
 
+        # Batch Management Table
+        self.batch_frame = ttk.Frame(self)
+        self.batch_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        self.batch_frame.columnconfigure(0, weight=1)
+        ttk.Label(self.batch_frame, text="Batch Management", font=("Helvetica", 14, "bold")).grid(row=0, column=0, pady=5)
+        self.batch_tree = ttk.Treeview(self.batch_frame, columns=("batch_ref", "product_name", "expected_lots", "status"), show="headings")
+        self.batch_tree.grid(row=1, column=0, sticky="nsew")
+        for col, width, heading in zip(["batch_ref", "product_name", "expected_lots", "status"], [120, 150, 100, 100], ["Batch Ref", "Product Name", "Expected Lots", "Status"]):
+            self.batch_tree.heading(col, text=heading)
+            self.batch_tree.column(col, width=width)
+        self.batch_tree.bind("<Button-3>", self.show_batch_context_menu)
+        self.batch_tree.bind("<Double-1>", self.on_batch_double_click)
+
+    def show_batch_context_menu(self, event):
+        item = self.batch_tree.identify_row(event.y)
+        if item:
+            self.batch_tree.selection_set(item)
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Edit Batch", command=lambda: self.edit_batch(item))
+            menu.add_command(label="Delete Batch", command=lambda: self.delete_batch_confirmed(item))
+            menu.post(event.x_root, event.y_root)
+
+    def edit_batch(self, item):
+        batch_ref = self.batch_tree.item(item)["values"][0]
+        dialog = tk.Toplevel(self)
+        dialog.title("Edit Batch")
+        dialog.geometry("400x300")
+        ttk.Label(dialog, text="Batch Ref:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        batch_e = ttk.Entry(dialog, width=30)
+        batch_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        batch_e.insert(0, batch_ref)
+
+        ttk.Label(dialog, text="Product Name:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        product_e = ttk.Entry(dialog, width=30)
+        product_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT product_name FROM batches WHERE batch_ref=?", (batch_ref,))
+            row = cur.fetchone()
+            if row:
+                product_e.insert(0, row["product_name"])
+
+        ttk.Label(dialog, text="Expected Lots:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
+        lots_e = ttk.Entry(dialog, width=30)
+        lots_e.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
+            row = cur.fetchone()
+            if row:
+                lots_e.insert(0, row["expected_lots"])
+
+        ttk.Label(dialog, text="Status:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
+        status_var = tk.StringVar(value="Ordered")
+        statuses = ["Ordered", "Knitted", "Dyed", "Received"]
+        ttk.OptionMenu(dialog, status_var, "Ordered", *statuses).grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT status FROM batches WHERE batch_ref=?", (batch_ref,))
+            row = cur.fetchone()
+            if row:
+                status_var.set(row["status"])
+
+        def save_edit():
+            new_batch_ref = batch_e.get().strip()
+            product_name = product_e.get().strip()
+            expected_lots = lots_e.get().strip()
+            new_status = status_var.get()
+
+            if not new_batch_ref or not expected_lots or not product_name:
+                messagebox.showwarning("Missing Fields", "Batch Ref, Product Name, and Expected Lots are required.")
+                return
+
+            try:
+                expected_lots = int(expected_lots)
+                if expected_lots <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Expected Lots must be a positive integer.")
+                return
+
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE batches
+                    SET batch_ref=?, product_name=?, expected_lots=?, status=?
+                    WHERE batch_ref=?
+                """, (new_batch_ref, product_name, expected_lots, new_status, batch_ref))
+                conn.commit()
+            dialog.destroy()
+            self.reload_all()
+
+        ttk.Button(dialog, text="Save", command=save_edit).grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(dialog, text="Cancel", command=dialog.destroy).grid(row=5, column=0, columnspan=2, pady=5)
+
+    def delete_batch_confirmed(self, item):
+        batch_ref = self.batch_tree.item(item)["values"][0]
+        if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete batch '{batch_ref}'?"):
+            success = db.delete_batch(batch_ref)
+            if success:
+                self.reload_all()
+            else:
+                messagebox.showwarning("Delete Failed", f"Batch '{batch_ref}' cannot be deleted because it has associated purchases.")
+
+    def on_batch_double_click(self, event):
+        item = self.batch_tree.identify_row(event.y)
+        if item:
+            self.edit_batch(item)
+
     def reload_all(self):
         # Clear existing status data
         for status in self.status_vars:
@@ -136,6 +246,18 @@ class DashboardFrame(ttk.Frame):
 
             # Update chart
             self.update_chart(status_data, total_batches)
+
+            # Load batches into batch table (excluding yarn batches where fabricator_id is NULL)
+            for r in self.batch_tree.get_children():
+                self.batch_tree.delete(r)
+            cur.execute("""
+                SELECT batch_ref, product_name, expected_lots, status
+                FROM batches
+                WHERE fabricator_id IS NOT NULL
+                ORDER BY created_at DESC
+            """)
+            for row in cur.fetchall():
+                self.batch_tree.insert("", "end", values=(row["batch_ref"], row["product_name"], row["expected_lots"], row["status"]))
 
     def update_chart(self, status_data, total_batches):
         if total_batches > 0:
