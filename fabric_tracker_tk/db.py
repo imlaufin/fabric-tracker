@@ -370,6 +370,19 @@ def search_yarn_types_prefix(prefix: str, limit: int = 20):
         ).fetchall()]
     return rows
 
+def delete_yarn_type(name: str):
+    """Delete a yarn type if not referenced in purchases."""
+    if not name or not name.strip():
+        return False
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM purchases WHERE yarn_type=?", (name.strip(),))
+        if cur.fetchone()[0] > 0:
+            return False  # Cannot delete if in use
+        cur.execute("DELETE FROM yarn_types WHERE name=?", (name.strip(),))
+        conn.commit()
+    return True
+
 # ----------------------------
 # Fabric Types
 # ----------------------------
@@ -393,6 +406,17 @@ def search_fabric_types_prefix(prefix: str, limit: int = 20):
             r"SELECT name FROM fabric_types WHERE name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?", (like, limit)
         ).fetchall()]
     return rows
+
+def delete_fabric_type(name: str):
+    """Delete a fabric type if not referenced (e.g., in a hypothetical fabrics table)."""
+    if not name or not name.strip():
+        return False
+    with get_connection() as conn:
+        cur = conn.cursor()
+        # No reference check yet; add if a fabrics table exists
+        cur.execute("DELETE FROM fabric_types WHERE name=?", (name.strip(),))
+        conn.commit()
+    return True
 
 # ----------------------------
 # Fabricators / Batches / Lots
