@@ -9,6 +9,7 @@ DB_NAME = "fabric_tracker.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
+COST_RATES = {"knitting": 5.0, "dyeing": 10.0}  # Configurable rates in $/kg
 
 # Define persistent database path
 if os.name == 'nt':  # Windows
@@ -108,7 +109,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fabric_type_id INTEGER,
             yarn_type_id INTEGER,
-            component TEXT,  -- Added for Rib/Collar distinction
+            component TEXT,
             quantity REAL,
             ratio REAL,
             FOREIGN KEY(fabric_type_id) REFERENCES fabric_types(id) ON DELETE CASCADE,
@@ -129,7 +130,7 @@ def init_db():
             price_per_unit REAL DEFAULT 0,
             delivered_to TEXT,
             notes TEXT,
-            includes_rib_collar INTEGER DEFAULT 0  -- Added to track Rib/Collar
+            includes_rib_collar INTEGER DEFAULT 0
         )
         """)
         cur.execute("""
@@ -184,7 +185,7 @@ def init_db():
         )
         """)
 
-        # Migration: Add missing columns
+        # Migration: Add missing columns with data consistency
         cur.execute("PRAGMA table_info(lots)")
         columns = [row["name"] for row in cur.fetchall()]
         if "weight_kg" not in columns:
@@ -588,7 +589,6 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                # Assuming a default fabric type for simplicity; adjust UI to specify
                 cur.execute("SELECT id FROM fabric_types LIMIT 1")
                 fabric_type_id = cur.fetchone()["id"] if cur.fetchone() else None
                 if not fabric_type_id:
@@ -620,7 +620,11 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             cur.execute("""
                 INSERT OR IGNORE INTO yarn_stock (fabricator, yarn_type, qty_kg)
                 VALUES (?, ?, ?)
-            """, (delivered_to, yarn_type, qty_kg))
+            """, (delivered_to, yarn_type, 0))
+            cur.execute("SELECT qty_kg FROM yarn_stock WHERE fabricator = ? AND yarn_type = ?", (delivered_to, yarn_type))
+            current_stock = cur.fetchone()["qty_kg"]
+            if current_stock + qty_kg < 0:
+                raise ValueError(f"Insufficient {yarn_type} stock ({current_stock} kg) at {delivered_to}")
             cur.execute("""
                 UPDATE yarn_stock
                 SET qty_kg = qty_kg + ?
@@ -649,13 +653,15 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
                                 INSERT OR IGNORE INTO yarn_stock (fabricator, yarn_type, qty_kg)
                                 VALUES (?, ?, 0)
                             """, (delivered_to, rib_collar_yarn))
+                            cur.execute("SELECT qty_kg FROM yarn_stock WHERE fabricator = ? AND yarn_type = ?", (delivered_to, rib_collar_yarn))
+                            current_rib_stock = cur.fetchone()["qty_kg"]
+                            if current_rib_stock - consumed_kg < 0:
+                                raise ValueError(f"Insufficient {rib_collar_yarn} stock ({current_rib_stock} kg) at {delivered_to}")
                             cur.execute("""
                                 UPDATE yarn_stock
                                 SET qty_kg = qty_kg - ?
-                                WHERE fabricator = ? AND yarn_type = ? AND qty_kg >= ?
-                            """, (consumed_kg, delivered_to, rib_collar_yarn, consumed_kg))
-                            if cur.rowcount == 0:
-                                raise ValueError(f"Insufficient {rib_collar_yarn} stock ({consumed_kg} kg) at {delivered_to}")
+                                WHERE fabricator = ? AND yarn_type = ?
+                            """, (consumed_kg, delivered_to, rib_collar_yarn))
 
         # Update lot weight and status within the same connection
         lot_id = get_lot_id_by_no(lot_no)
@@ -731,6 +737,10 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
 
         # Adjust new stock
         if delivered_to:
+            cur.execute("SELECT qty_kg FROM yarn_stock WHERE fabricator = ? AND yarn_type = ?", (delivered_to, yarn_type))
+            current_stock = cur.fetchone()
+            if not current_stock or current_stock["qty_kg"] + qty_kg < 0:
+                raise ValueError(f"Insufficient {yarn_type} stock at {delivered_to}")
             cur.execute("""
                 UPDATE yarn_stock
                 SET qty_kg = qty_kg + ?
@@ -752,13 +762,15 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
                         rib_collar_yarn = comp["yarn_type"]
                         ratio = comp["ratio"]
                         consumed_kg = qty_rolls * 0.5 * (ratio / 100)
+                        cur.execute("SELECT qty_kg FROM yarn_stock WHERE fabricator = ? AND yarn_type = ?", (delivered_to, rib_collar_yarn))
+                        current_rib_stock = cur.fetchone()
+                        if not current_rib_stock or current_rib_stock["qty_kg"] - consumed_kg < 0:
+                            raise ValueError(f"Insufficient {rib_collar_yarn} stock ({current_rib_stock['qty_kg']} kg) at {delivered_to}")
                         cur.execute("""
                             UPDATE yarn_stock
                             SET qty_kg = qty_kg - ?
-                            WHERE fabricator = ? AND yarn_type = ? AND qty_kg >= ?
-                        """, (consumed_kg, delivered_to, rib_collar_yarn, consumed_kg))
-                        if cur.rowcount == 0:
-                            raise ValueError(f"Insufficient {rib_collar_yarn} stock ({consumed_kg} kg) at {delivered_to}")
+                            WHERE fabricator = ? AND yarn_type = ?
+                        """, (consumed_kg, delivered_to, rib_collar_yarn))
 
         # Update lot weight
         lot_id = get_lot_id_by_no(lot_no)
@@ -815,7 +827,7 @@ def delete_purchase(purchase_id: int):
             cur.execute("DELETE FROM purchases WHERE id=?", (purchase_id,))
         conn.commit()
 
-def record_dyeing_output(dyeing_id, lot_id, returned_date, returned_qty_kg, returned_qty_rolls, notes=""):
+def record_dyeing_output(lot_id, returned_date, returned_qty_kg, returned_qty_rolls, notes="", dyeing_unit_name=None):
     resolved_lot_id = None
     if isinstance(lot_id, int):
         resolved_lot_id = lot_id
@@ -826,21 +838,22 @@ def record_dyeing_output(dyeing_id, lot_id, returned_date, returned_qty_kg, retu
             resolved_lot_id = get_lot_id_by_no(lot_id)
     if not resolved_lot_id:
         raise ValueError(f"Lot ID or Lot No '{lot_id}' not found.")
+    dyeing_unit_id = get_supplier_id_by_name(dyeing_unit_name, "dyeing_unit") if dyeing_unit_name else None
+    if dyeing_unit_name and not dyeing_unit_id:
+        raise ValueError(f"Dyeing unit '{dyeing_unit_name}' not found.")
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT batch_id FROM lots WHERE id=?", (resolved_lot_id,))
         batch_id = cur.fetchone()["batch_id"]
-        cur.execute("SELECT fabric_type_id, dyeing_unit_id FROM batches WHERE id=?", (batch_id,))
-        batch_row = cur.fetchone()
-        if not batch_row:
+        if not batch_id:
             raise ValueError(f"Batch for lot ID {resolved_lot_id} not found.")
-        fabric_type_id = batch_row["fabric_type_id"]
-        dyeing_unit_id = batch_row["dyeing_unit_id"]
+        if dyeing_unit_id:
+            cur.execute("UPDATE batches SET dyeing_unit_id = ? WHERE id = ?", (dyeing_unit_id, batch_id))
 
         cur.execute("""
-            INSERT INTO dyeing_outputs (id, lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (dyeing_id, resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
+            INSERT INTO dyeing_outputs (lot_id, dyeing_unit_id, returned_date, returned_qty_kg, returned_qty_rolls, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
         dyeing_output_id = cur.lastrowid
 
         # Update lot status based on completion
@@ -857,7 +870,21 @@ def record_dyeing_output(dyeing_id, lot_id, returned_date, returned_qty_kg, retu
 
 def delete_dyeing_output(dyeing_id: int):
     with get_connection() as conn:
-        conn.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
+        cur = conn.cursor()
+        cur.execute("SELECT lot_id FROM dyeing_outputs WHERE id=?", (dyeing_id,))
+        row = cur.fetchone()
+        if row:
+            lot_id = row["lot_id"]
+            cur.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
+            # Revert lot and batch status if no other dyeing outputs exist
+            cur.execute("SELECT COUNT(*) FROM dyeing_outputs WHERE lot_id=?", (lot_id,))
+            if cur.fetchone()[0] == 0:
+                cur.execute("UPDATE lots SET status='Knitted' WHERE id=?", (lot_id,))
+                cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
+                batch_id = cur.fetchone()["batch_id"]
+                cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
+                min_status = cur.fetchone()["min_status"]
+                cur.execute("UPDATE batches SET status=? WHERE id=?", (min_status, batch_id,))
         conn.commit()
 
 # Helper function to get batch_id by reference
@@ -928,7 +955,7 @@ def calculate_net_price(batch_id):
         cur.execute("SELECT SUM(price_per_unit * qty_kg) AS yarn_cost FROM purchases WHERE batch_id=?", (batch_id,))
         yarn_cost = cur.fetchone()["yarn_cost"] or 0
 
-        # Knitting cost (e.g., $5 per kg for Shiv Fabrics)
+        # Knitting cost based on configurable rate
         cur.execute("""
             SELECT p.delivered_to, SUM(p.qty_kg) AS total_kg
             FROM purchases p
@@ -936,9 +963,9 @@ def calculate_net_price(batch_id):
             GROUP BY p.delivered_to
         """, (batch_id,))
         knitting_row = cur.fetchone()
-        knitting_cost = (knitting_row["total_kg"] or 0) * 5 if knitting_row else 0
+        knitting_cost = (knitting_row["total_kg"] or 0) * COST_RATES["knitting"] if knitting_row else 0
 
-        # Dyeing cost (e.g., $10 per kg for Oswal Finishing Mills)
+        # Dyeing cost based on configurable rate
         cur.execute("""
             SELECT SUM(d.returned_qty_kg) AS dyed_kg
             FROM dyeing_outputs d
@@ -947,7 +974,7 @@ def calculate_net_price(batch_id):
             WHERE b.id=? AND d.dyeing_unit_id = (SELECT id FROM suppliers WHERE name='Oswal Finishing Mills' LIMIT 1)
         """, (batch_id,))
         dyeing_row = cur.fetchone()
-        dyeing_cost = (dyeing_row["dyed_kg"] or 0) * 10 if dyeing_row else 0
+        dyeing_cost = (dyeing_row["dyed_kg"] or 0) * COST_RATES["dyeing"] if dyeing_row else 0
 
         net_price = yarn_cost + knitting_cost + dyeing_cost
     return net_price
