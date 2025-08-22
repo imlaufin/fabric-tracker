@@ -112,6 +112,8 @@ class EntriesFrame(ttk.Frame):
         ttk.Label(frm, text="Delivered To").grid(row=3, column=0, sticky="w")
         self.delivered_cb = AutocompleteCombobox(frm, width=25)
         self.delivered_cb.grid(row=3, column=1, sticky="w")
+        self.rib_collar_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(frm, text="Includes Rib/Collar", variable=self.rib_collar_var).grid(row=3, column=2, sticky="w")
         ttk.Button(frm, text="Save", command=self.save_purchase).grid(row=4, column=0, pady=8, sticky="w")
         ttk.Button(frm, text="Clear (Qty/Lot)", command=self.clear_purchase_form).grid(row=4, column=1, sticky="w")
         ttk.Button(frm, text="Create Batch", command=self.create_batch_dialog).grid(row=4, column=2, sticky="w")
@@ -299,6 +301,7 @@ class EntriesFrame(ttk.Frame):
         supplier = self.supplier_cb.get().strip()
         yarn = self.yarn_cb.get().strip()
         delivered = self.delivered_cb.get().strip()
+        includes_rib_collar = self.rib_collar_var.get()
 
         try:
             kg = float(self.kg_e.get().strip() or 0)
@@ -312,9 +315,9 @@ class EntriesFrame(ttk.Frame):
             messagebox.showwarning("Invalid Quantity", "At least one of Qty (kg) or Qty (rolls) must be greater than 0")
             return
 
-        self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price)
+        self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar)
 
-    def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price):
+    def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar):
         if not date or not yarn or not delivered:
             messagebox.showwarning("Missing", "Please fill required fields: Date, Yarn Type, Delivered To")
             return
@@ -335,7 +338,39 @@ class EntriesFrame(ttk.Frame):
             if self.selected_purchase_id:
                 db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
             else:
-                db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                with db.get_connection() as conn:
+                    cur = conn.cursor()
+                    # Fetch batch fabric type for composition
+                    cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch,))
+                    row = cur.fetchone()
+                    if row:
+                        fabric_type_id = row["fabric_type_id"]
+                        # Record purchase
+                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                        # Apply Rib/Collar consumption if applicable
+                        if includes_rib_collar:
+                            cur.execute("""
+                                SELECT yc.yarn_type, yc.ratio
+                                FROM fabric_yarn_composition yc
+                                WHERE yc.fabric_type_id = ? AND (yc.component = 'Rib' OR yc.component = 'Collar')
+                            """, (fabric_type_id,))
+                            rib_collar_comps = cur.fetchall()
+                            if rib_collar_comps:
+                                for comp in rib_collar_comps:
+                                    yarn_type = comp["yarn_type"]
+                                    ratio = comp["ratio"]
+                                    consumed_kg = rolls * 0.5 * (ratio / 100)  # 0.5 kg per roll example
+                                    cur.execute("""
+                                        UPDATE yarn_stock
+                                        SET qty_kg = qty_kg - ?
+                                        WHERE fabricator = ? AND yarn_type = ? AND qty_kg >= ?
+                                    """, (consumed_kg, delivered, yarn_type, consumed_kg))
+                                    if cur.rowcount == 0:
+                                        messagebox.showerror("Insufficient Stock", f"Not enough {yarn_type} ({consumed_kg} kg) for Rib/Collar at {delivered}.")
+                                        conn.rollback()
+                                        return
+                    else:
+                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
         except ValueError as e:
             messagebox.showerror("Invalid Date", str(e))
             return
@@ -375,6 +410,7 @@ class EntriesFrame(ttk.Frame):
             self.price_e.delete(0, tk.END)
             self.price_e.insert(0, self._last_purchase_defaults["price"])
             self.delivered_cb.set(self._last_purchase_defaults["delivered"])
+            self.rib_collar_var.set(False)  # Reset Rib/Collar checkbox
         else:
             self.batch_e.delete(0, tk.END)
             self.price_e.delete(0, tk.END)
@@ -383,6 +419,7 @@ class EntriesFrame(ttk.Frame):
             self.supplier_cb.set("")
             self.yarn_cb.set("")
             self.delivered_cb.set("")
+            self.rib_collar_var.set(False)  # Reset Rib/Collar checkbox
             self._last_purchase_defaults = {
                 "date": self.date_e.get(),
                 "batch": "",
@@ -640,6 +677,7 @@ class EntriesFrame(ttk.Frame):
         self.price_e.delete(0, tk.END)
         self.price_e.insert(0, row["price_per_unit"])
         self.delivered_cb.set(row["delivered_to"])
+        self.rib_collar_var.set(False)  # Reset Rib/Collar checkbox (no stored state yet)
         self._last_purchase_defaults.update({
             "date": self.date_e.get(),
             "batch": self.batch_e.get(),
