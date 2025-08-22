@@ -280,8 +280,16 @@ def add_master(name, mtype="yarn_supplier", color_code=""):
         conn.commit()
 
 def update_master_color_and_type(name, mtype, color_hex):
+    if not name or not name.strip():
+        return
     with get_connection() as conn:
-        conn.execute("UPDATE suppliers SET type=?, color_code=? WHERE name=?", (mtype, color_hex, name))
+        cur = conn.cursor()
+        # Delete existing entry to enforce uniqueness, then re-insert
+        cur.execute("DELETE FROM suppliers WHERE name=?", (name.strip(),))
+        cur.execute(
+            "INSERT INTO suppliers (name, type, color_code) VALUES (?, ?, ?)",
+            (name.strip(), mtype, color_hex)
+        )
         conn.commit()
 
 def delete_master_by_name(name: str):
@@ -305,6 +313,7 @@ def delete_master_by_name(name: str):
                 ("purchases", "supplier"),
                 ("purchases", "delivered_to"),
                 ("batches", "fabricator_id"),
+                ("batches", "dyeing_unit_id"),
                 ("dyeing_outputs", "dyeing_unit_id")
             ]:
                 cur.execute(
@@ -574,6 +583,25 @@ def get_batch_id_by_ref(batch_ref):
     with get_connection() as conn:
         row = conn.execute("SELECT id FROM batches WHERE batch_ref=? LIMIT 1", (batch_ref,)).fetchone()
     return row["id"] if row else None
+
+def delete_batch(batch_ref):
+    """Delete a batch and its associated lots, with safety checks."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        batch_id = get_batch_id_by_ref(batch_ref)
+        if not batch_id:
+            return False
+        
+        # Check for related purchases
+        cur.execute("SELECT 1 FROM purchases WHERE batch_id=? LIMIT 1", (batch_ref,))
+        if cur.fetchone():
+            return False  # Prevent deletion if purchases exist
+        
+        # Delete lots and batch
+        cur.execute("DELETE FROM lots WHERE batch_id=?", (batch_id,))
+        cur.execute("DELETE FROM batches WHERE id=?", (batch_id,))
+        conn.commit()
+    return True
 
 # ----------------------------
 # New Functions
