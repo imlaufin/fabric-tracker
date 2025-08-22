@@ -86,9 +86,9 @@ class DashboardFrame(ttk.Frame):
         self.batch_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         self.batch_frame.columnconfigure(0, weight=1)
         ttk.Label(self.batch_frame, text="Batch Management", font=("Helvetica", 14, "bold")).grid(row=0, column=0, pady=5)
-        self.batch_tree = ttk.Treeview(self.batch_frame, columns=("batch_ref", "product_name", "expected_lots", "status"), show="headings")
+        self.batch_tree = ttk.Treeview(self.batch_frame, columns=("batch_ref", "fabric_type", "expected_lots", "status"), show="headings")
         self.batch_tree.grid(row=1, column=0, sticky="nsew")
-        for col, width, heading in zip(["batch_ref", "product_name", "expected_lots", "status"], [120, 150, 100, 100], ["Batch Ref", "Product Name", "Expected Lots", "Status"]):
+        for col, width, heading in zip(["batch_ref", "fabric_type", "expected_lots", "status"], [120, 150, 100, 100], ["Batch Ref", "Fabric Type", "Expected Lots", "Status"]):
             self.batch_tree.heading(col, text=heading)
             self.batch_tree.column(col, width=width)
         self.batch_tree.bind("<Button-3>", self.show_batch_context_menu)
@@ -105,57 +105,54 @@ class DashboardFrame(ttk.Frame):
 
     def edit_batch(self, item):
         batch_ref = self.batch_tree.item(item)["values"][0]
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, fabric_type_id, expected_lots, status FROM batches WHERE batch_ref=?", (batch_ref,))
+            row = cur.fetchone()
+            if not row:
+                messagebox.showerror("Error", f"Batch '{batch_ref}' not found.")
+                return
+            batch_id = row["id"]
+            fabric_type_id = row["fabric_type_id"]
+            expected_lots = row["expected_lots"]
+            status = row["status"]
+
         dialog = tk.Toplevel(self)
         dialog.title("Edit Batch")
         dialog.geometry("400x300")
+
         ttk.Label(dialog, text="Batch Ref:").grid(row=0, column=0, padx=5, pady=5, sticky="e")
         batch_e = ttk.Entry(dialog, width=30)
         batch_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         batch_e.insert(0, batch_ref)
 
-        ttk.Label(dialog, text="Product Name:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        product_e = ttk.Entry(dialog, width=30)
-        product_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT product_name FROM batches WHERE batch_ref=?", (batch_ref,))
-            row = cur.fetchone()
-            if row:
-                product_e.insert(0, row["product_name"])
+        ttk.Label(dialog, text="Fabric Type:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        fabric_types = db.list_fabric_types()
+        fabric_var = tk.StringVar(value=next((f for f in fabric_types if db.get_connection().execute("SELECT id FROM fabric_types WHERE name=?", (f,)).fetchone()["id"] == fabric_type_id), ""))
+        ttk.OptionMenu(dialog, fabric_var, fabric_var.get(), *fabric_types).grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
         ttk.Label(dialog, text="Expected Lots:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         lots_e = ttk.Entry(dialog, width=30)
         lots_e.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT expected_lots FROM batches WHERE batch_ref=?", (batch_ref,))
-            row = cur.fetchone()
-            if row:
-                lots_e.insert(0, row["expected_lots"])
+        lots_e.insert(0, str(expected_lots))
 
         ttk.Label(dialog, text="Status:").grid(row=3, column=0, padx=5, pady=5, sticky="e")
-        status_var = tk.StringVar(value="Ordered")
+        status_var = tk.StringVar(value=status)
         statuses = ["Ordered", "Knitted", "Dyed", "Received"]
-        ttk.OptionMenu(dialog, status_var, "Ordered", *statuses).grid(row=3, column=1, padx=5, pady=5, sticky="w")
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT status FROM batches WHERE batch_ref=?", (batch_ref,))
-            row = cur.fetchone()
-            if row:
-                status_var.set(row["status"])
+        ttk.OptionMenu(dialog, status_var, status, *statuses).grid(row=3, column=1, padx=5, pady=5, sticky="w")
 
         def save_edit():
             new_batch_ref = batch_e.get().strip()
-            product_name = product_e.get().strip()
-            expected_lots = lots_e.get().strip()
+            fabric_type_name = fabric_var.get().strip()
+            expected_lots_str = lots_e.get().strip()
             new_status = status_var.get()
 
-            if not new_batch_ref or not expected_lots or not product_name:
-                messagebox.showwarning("Missing Fields", "Batch Ref, Product Name, and Expected Lots are required.")
+            if not new_batch_ref or not fabric_type_name or not expected_lots_str:
+                messagebox.showwarning("Missing Fields", "Batch Ref, Fabric Type, and Expected Lots are required.")
                 return
 
             try:
-                expected_lots = int(expected_lots)
+                expected_lots = int(expected_lots_str)
                 if expected_lots <= 0:
                     raise ValueError
             except ValueError:
@@ -164,12 +161,28 @@ class DashboardFrame(ttk.Frame):
 
             with db.get_connection() as conn:
                 cur = conn.cursor()
+                cur.execute("SELECT id FROM fabric_types WHERE name=?", (fabric_type_name,))
+                fabric_type_id = cur.fetchone()
+                if not fabric_type_id:
+                    messagebox.showerror("Error", f"Fabric type '{fabric_type_name}' not found.")
+                    return
+                fabric_type_id = fabric_type_id["id"]
                 cur.execute("""
                     UPDATE batches
-                    SET batch_ref=?, product_name=?, expected_lots=?, status=?
-                    WHERE batch_ref=?
-                """, (new_batch_ref, product_name, expected_lots, new_status, batch_ref))
+                    SET batch_ref=?, fabric_type_id=?, expected_lots=?, status=?
+                    WHERE id=?
+                """, (new_batch_ref, fabric_type_id, expected_lots, new_status, batch_id))
                 conn.commit()
+                # Update lots if expected_lots changed
+                cur.execute("SELECT COUNT(*) FROM lots WHERE batch_id=?", (batch_id,))
+                current_lots = cur.fetchone()[0]
+                if expected_lots > current_lots:
+                    for i in range(current_lots + 1, expected_lots + 1):
+                        db.create_lot(batch_id, i)
+                elif expected_lots < current_lots:
+                    cur.execute("DELETE FROM lots WHERE batch_id=? AND lot_index > ?", (batch_id, expected_lots))
+                conn.commit()
+
             dialog.destroy()
             self.reload_all()
 
@@ -251,13 +264,14 @@ class DashboardFrame(ttk.Frame):
             for r in self.batch_tree.get_children():
                 self.batch_tree.delete(r)
             cur.execute("""
-                SELECT batch_ref, product_name, expected_lots, status
-                FROM batches
-                WHERE fabricator_id IS NOT NULL
-                ORDER BY created_at DESC
+                SELECT b.batch_ref, ft.name AS fabric_type, b.expected_lots, b.status
+                FROM batches b
+                LEFT JOIN fabric_types ft ON b.fabric_type_id = ft.id
+                WHERE b.fabricator_id IS NOT NULL
+                ORDER BY b.created_at DESC
             """)
             for row in cur.fetchall():
-                self.batch_tree.insert("", "end", values=(row["batch_ref"], row["product_name"], row["expected_lots"], row["status"]))
+                self.batch_tree.insert("", "end", values=(row["batch_ref"], row["fabric_type"] or "N/A", row["expected_lots"], row["status"]))
 
     def update_chart(self, status_data, total_batches):
         if total_batches > 0:
