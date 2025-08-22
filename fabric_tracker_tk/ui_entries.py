@@ -155,6 +155,7 @@ class EntriesFrame(ttk.Frame):
             self.tree.selection_set(item)
             menu = tk.Menu(self, tearoff=0)
             menu.add_command(label="Delete", command=lambda: self.delete_purchase_confirmed(int(item)))
+            menu.add_command(label="Delete Batch", command=lambda: self.delete_batch_confirmed(self.tree.set(item, "batch")))
             menu.post(event.x_root, event.y_root)
 
     def delete_purchase_confirmed(self, purchase_id):
@@ -163,6 +164,19 @@ class EntriesFrame(ttk.Frame):
             self.reload_entries()
             if self.controller and hasattr(self.controller, "fabricators_frame"):
                 self.controller.fabricators_frame.build_tabs()
+
+    def delete_batch_confirmed(self, batch_ref):
+        if not batch_ref:
+            messagebox.showwarning("Invalid Selection", "No batch selected for deletion.")
+            return
+        if messagebox.askyesno("Confirm Delete Batch", f"Are you sure you want to delete batch '{batch_ref}' and all its lots? This cannot be undone if no purchases are associated."):
+            success = db.delete_batch(batch_ref)
+            if success:
+                self.reload_entries()
+                if self.controller and hasattr(self.controller, "fabricators_frame"):
+                    self.controller.fabricators_frame.build_tabs()
+            else:
+                messagebox.showwarning("Delete Failed", f"Batch '{batch_ref}' cannot be deleted because it has associated purchases.")
 
     def build_dyeing_form(self, parent):
         frm = ttk.Frame(parent)
