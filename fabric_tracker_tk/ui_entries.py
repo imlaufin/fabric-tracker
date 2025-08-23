@@ -439,7 +439,8 @@ class EntriesFrame(ttk.Frame):
         ttk.Label(dialog, text="Fabric Type:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
         fabric_cb = AutocompleteCombobox(dialog, width=30)
         fabric_cb.grid(row=2, column=1, padx=5, pady=5, sticky="w")
-        fabric_types = db.list_fabric_types()
+        fabric_types = [comp["name"] for comp in db.list_fabric_compositions()]
+        fabric_types = list(dict.fromkeys(fabric_types))  # Remove duplicates
         fabric_cb.set_completion_list(fabric_types)
 
         ttk.Label(dialog, text="Has Rib?").grid(row=3, column=0, padx=5, pady=5, sticky="e")
