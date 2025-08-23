@@ -275,12 +275,16 @@ class EntriesFrame(ttk.Frame):
                 cur.execute("INSERT INTO suppliers (name, type) VALUES (?, ?)", (name, "yarn_supplier"))
         conn.commit()
         conn.close()
+        # Refresh lists after adding a new supplier
+        self.refresh_lists()
 
     def _ensure_yarn_type_exists(self, name):
         name = (name or "").strip()
         if not name:
             return
         db.add_yarn_type(name)
+        # Refresh lists after adding a new yarn type
+        self.refresh_lists()
 
     def reload_entries(self):
         for r in self.tree.get_children():
@@ -327,10 +331,10 @@ class EntriesFrame(ttk.Frame):
         delivered = self.delivered_cb.get().strip()
 
         if delivered and delivered not in list(self.delivered_cb["values"]):
-            self._ensure_supplier_exists(delivered)
+            self._ensure_supplier_exists(delivered, "knitting_unit" if delivered in [r["name"] for r in db.list_suppliers("knitting_unit")] else "dyeing_unit")
 
         if supplier and supplier not in list(self.supplier_cb["values"]):
-            self._ensure_supplier_exists(supplier)
+            self._ensure_supplier_exists(supplier, "yarn_supplier")
 
         if yarn and yarn not in list(self.yarn_cb["values"]):
             self._ensure_yarn_type_exists(yarn)
@@ -555,6 +559,10 @@ class EntriesFrame(ttk.Frame):
             cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
             row = cur.fetchone()
             if not row:
+                self._ensure_supplier_exists(unit, "dyeing_unit")
+                cur.execute("SELECT id FROM suppliers WHERE name=? AND type='dyeing_unit'", (unit,))
+                row = cur.fetchone()
+            if not row:
                 messagebox.showerror("Invalid Unit", f"Dyeing unit '{unit}' not found")
                 return
             unit_id = row["id"]
@@ -719,3 +727,7 @@ class EntriesFrame(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Database Error", f"Failed to load dyeing output: {str(e)}")
             self.selected_dyeing_id = None
+
+    def refresh_lists_callback(self):
+        """Callback to refresh lists when master data changes."""
+        self.refresh_lists()
