@@ -29,7 +29,7 @@ class MastersFrame(ttk.Frame):
 
     def build_ui(self):
         # Main canvas with scrollbar
-        self.canvas = tk.Canvas(self, bg="white")
+        self.canvas = tk.Canvas(self, bg="white", width=800, height=600)  # Set initial size
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -37,20 +37,24 @@ class MastersFrame(ttk.Frame):
         self.inner_frame = ttk.Frame(self.canvas)
         self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
         self.inner_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        print(f"[DEBUG] Canvas created with scrollregion: {self.canvas.bbox('all')}")
 
         # Supplier Section
-        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")
+        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers", background="lightgray")  # Visible background
         supplier_frame.place(x=10, y=10)
+        print(f"[DEBUG] Supplier frame placed at (10, 10)")
         self.build_supplier_ui(supplier_frame)
 
         # Yarn Types Section
-        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")
+        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types", background="lightgray")  # Visible background
         yarn_frame.place(x=10, y=200)
+        print(f"[DEBUG] Yarn frame placed at (10, 200)")
         self.build_yarn_type_ui(yarn_frame)
 
         # Fabric Compositions Section (combined)
-        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")
+        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions", background="lightgray")  # Visible background
         fabric_comp_frame.place(x=10, y=400)
+        print(f"[DEBUG] Fabric comp frame placed at (10, 400)")
         self.build_fabric_composition_ui(fabric_comp_frame)
 
         # Make frames moveable and resizable
@@ -87,7 +91,7 @@ class MastersFrame(ttk.Frame):
         self.supplier_tree.column("name", width=200)
         self.supplier_tree.column("type", width=150)
         self.supplier_tree.column("color", width=100)
-        self.supplier_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
+        self.supplier_tree.pack(fill="x", padx=5, pady=5)
 
         # Right-click context menu for suppliers
         self.supplier_menu = tk.Menu(self, tearoff=0)
@@ -108,8 +112,8 @@ class MastersFrame(ttk.Frame):
 
         self.yarn_tree = ttk.Treeview(parent, columns=("name",), show="headings", height=5)
         self.yarn_tree.heading("name", text="Yarn Type")
-        self.yarn_tree.column("name", width=100)  # Narrowed from 350 to 100
-        self.yarn_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
+        self.yarn_tree.column("name", width=100)
+        self.yarn_tree.pack(fill="x", padx=5, pady=5)
 
         # Right-click context menu for yarn types
         self.yarn_menu = tk.Menu(self, tearoff=0)
@@ -156,7 +160,7 @@ class MastersFrame(ttk.Frame):
         self.fabric_comp_tree.column("component", width=100)
         self.fabric_comp_tree.column("yarn_type", width=150)
         self.fabric_comp_tree.column("ratio", width=100)
-        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
+        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)
 
         # Add resize handle (visual cue)
         self.resize_handle = tk.Label(parent, bg="gray", width=10, height=10)
@@ -387,6 +391,7 @@ class MastersFrame(ttk.Frame):
             for r in tree.get_children():
                 tree.delete(r)
         self.color_imgs.clear()
+        print(f"[DEBUG] Loading masters...")
 
         # Load Suppliers
         for row in db.list_suppliers():
@@ -400,14 +405,17 @@ class MastersFrame(ttk.Frame):
                 self.supplier_tree.insert("", "end", values=(name, type_label, color), image=img)
             else:
                 self.supplier_tree.insert("", "end", values=(name, type_label, ""))
+        print(f"[DEBUG] Loaded {len(db.list_suppliers())} suppliers")
 
         # Load Yarn Types
         for name in db.list_yarn_types():
             self.yarn_tree.insert("", "end", values=(name,))
+        print(f"[DEBUG] Loaded {len(db.list_yarn_types())} yarn types")
 
         # Load Fabric Compositions
         for comp in db.list_fabric_compositions():
             self.fabric_comp_tree.insert("", "end", values=(comp["name"], comp["component"], comp["yarn_type"], comp["ratio"]))
+        print(f"[DEBUG] Loaded {len(db.list_fabric_compositions())} fabric compositions")
 
         # Update comboboxes
         self.comp_yarn_cb['values'] = db.list_yarn_types()
