@@ -87,7 +87,7 @@ class MastersFrame(ttk.Frame):
         self.supplier_tree.column("name", width=200)
         self.supplier_tree.column("type", width=150)
         self.supplier_tree.column("color", width=100)
-        self.supplier_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
+        self.supplier_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
 
         # Right-click context menu for suppliers
         self.supplier_menu = tk.Menu(self, tearoff=0)
@@ -109,7 +109,7 @@ class MastersFrame(ttk.Frame):
         self.yarn_tree = ttk.Treeview(parent, columns=("name",), show="headings", height=5)
         self.yarn_tree.heading("name", text="Yarn Type")
         self.yarn_tree.column("name", width=100)  # Narrowed from 350 to 100
-        self.yarn_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
+        self.yarn_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
 
         # Right-click context menu for yarn types
         self.yarn_menu = tk.Menu(self, tearoff=0)
@@ -156,7 +156,7 @@ class MastersFrame(ttk.Frame):
         self.fabric_comp_tree.column("component", width=100)
         self.fabric_comp_tree.column("yarn_type", width=150)
         self.fabric_comp_tree.column("ratio", width=100)
-        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
+        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)  # Removed sticky="nsew"
 
         # Add resize handle (visual cue)
         self.resize_handle = tk.Label(parent, bg="gray", width=10, height=10)
