@@ -198,6 +198,10 @@ class KnittingTab(ttk.Frame):
                 net_kg = max(0, kg_in - kg_out)  # Clamp to 0 to avoid negative
                 self.summary_tree.insert("", "end", values=(yarn_type, net_kg))
 
+    def refresh_data(self):
+        """Callback to refresh all data when status or master data changes."""
+        self.reload_all()
+
 class DyeingTab(ttk.Frame):
     def __init__(self, parent, fabricator_row, controller=None):
         super().__init__(parent)
@@ -263,10 +267,12 @@ class DyeingTab(ttk.Frame):
         with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls,
+                       l.status
                 FROM purchases p
+                JOIN lots l ON l.lot_no = p.lot_no
                 WHERE p.delivered_to=?
-                GROUP BY p.batch_id, p.lot_no, p.yarn_type
+                GROUP BY p.batch_id, p.lot_no, p.yarn_type, l.status
             """, (self.fabricator["name"],))
             lots = cur.fetchall()
             for lot in lots:
@@ -284,7 +290,7 @@ class DyeingTab(ttk.Frame):
                 out = cur.fetchone()
                 rkg = out["rkg"] or 0
                 rrolls = out["rrolls"] or 0
-                if rkg < DYEING_COMPLETION_THRESHOLD * orig_kg:
+                if rkg < DYEING_COMPLETION_THRESHOLD * orig_kg and lot["status"] != "Received":
                     short_kg = orig_kg - rkg
                     short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
                     tag = "short" if short_pct > SHORTAGE_THRESHOLD_PERCENT else ""
@@ -297,10 +303,12 @@ class DyeingTab(ttk.Frame):
         with db.get_connection() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls
+                SELECT p.batch_id, p.lot_no, p.yarn_type, SUM(p.qty_kg) as orig_kg, SUM(p.qty_rolls) as orig_rolls,
+                       l.status
                 FROM purchases p
+                JOIN lots l ON l.lot_no = p.lot_no
                 WHERE p.delivered_to=?
-                GROUP BY p.batch_id, p.lot_no, p.yarn_type
+                GROUP BY p.batch_id, p.lot_no, p.yarn_type, l.status
             """, (self.fabricator["name"],))
             lots = cur.fetchall()
             for lot in lots:
@@ -318,12 +326,16 @@ class DyeingTab(ttk.Frame):
                 out = cur.fetchone()
                 rkg = out["rkg"] or 0
                 rrolls = out["rrolls"] or 0
-                if rkg >= DYEING_COMPLETION_THRESHOLD * orig_kg:
+                if rkg >= DYEING_COMPLETION_THRESHOLD * orig_kg or lot["status"] == "Received":
                     short_kg = orig_kg - rkg
                     short_pct = (short_kg / orig_kg * 100) if orig_kg > 0 else 0
                     tag = "short" if short_pct > DYEING_SHORTAGE_HIGHLIGHT else ""
                     self.completed_tree.insert("", "end", values=(batch_id, lot_no, yarn_type, orig_kg, orig_rolls, rkg, rrolls, round(short_kg, 2), round(short_pct, 2)), tags=(tag,))
             self.completed_tree.tag_configure("short", background="#ffcccc")
+
+    def refresh_data(self):
+        """Callback to refresh all data when status or master data changes."""
+        self.reload_all()
 
 class FabricatorsFrame(ttk.Frame):
     def __init__(self, parent, controller=None):
@@ -382,6 +394,7 @@ class FabricatorsFrame(ttk.Frame):
             self.tabs[r["name"]]["dyeing"] = tab
 
     def open_dyeing_tab_for_batch(self, fabricator_name, batch_ref):
+        """Open and focus on the dyeing tab for the specified fabricator and batch."""
         # Switch to Dyeing Units parent tab
         for ptab in self.parent_nb.tabs():
             if self.parent_nb.tab(ptab, "text") == "Dyeing Units":
@@ -395,8 +408,8 @@ class FabricatorsFrame(ttk.Frame):
             if self.dy_nb.tab(st, "text") == fabricator_name:
                 self.dy_nb.select(st)
                 widget = self.dy_nb.nametowidget(st)
-                if hasattr(widget, "reload_all"):
-                    widget.reload_all()
+                if hasattr(widget, "refresh_data"):
+                    widget.refresh_data()  # Refresh data before focusing
                 try:
                     for item in widget.pending_tree.get_children():
                         vals = widget.pending_tree.item(item)["values"]
@@ -412,3 +425,11 @@ class FabricatorsFrame(ttk.Frame):
                     pass
                 return
         messagebox.showinfo("Not found", f"Dyeing unit '{fabricator_name}' not found.")
+
+    def refresh_data(self):
+        """Callback to refresh all tabs when status or master data changes."""
+        for tab_dict in self.tabs.values():
+            if "knitting" in tab_dict and hasattr(tab_dict["knitting"], "refresh_data"):
+                tab_dict["knitting"].refresh_data()
+            if "dyeing" in tab_dict and hasattr(tab_dict["dyeing"], "refresh_data"):
+                tab_dict["dyeing"].refresh_data()
