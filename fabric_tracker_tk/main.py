@@ -38,7 +38,7 @@ class FabricTrackerApp(tk.Tk):
         self.dashboard_frame = DashboardFrame(self.notebook, self)
         self.entries_frame = EntriesFrame(self.notebook, self)
         self.fabricators_frame = FabricatorsFrame(self.notebook, controller=self)
-        self.masters_frame = MastersFrame(self.notebook, controller=self, on_change_callback=self.reload_fabricators)
+        self.masters_frame = MastersFrame(self.notebook, controller=self, on_change_callback=self.on_master_change)
         self.reports_frame = ReportsFrame(self.notebook, self)
         self.backup_frame = BackupRestoreFrame(self.notebook, controller=self)  # create backup/restore tab
 
@@ -50,16 +50,17 @@ class FabricTrackerApp(tk.Tk):
         self.notebook.add(self.reports_frame, text="Reports")
         self.notebook.add(self.backup_frame, text="Backup & Restore")  # add the new tab
 
-    def reload_fabricators(self):
-        # Called when Masters change, handles stage updates
+    def on_master_change(self):
+        """Callback when Masters data changes, refreshes Entries and Fabricators."""
         try:
+            self.entries_frame.refresh_lists_callback()  # Refresh autocomplete lists
             self.fabricators_frame.build_tabs()
             self.update_all_statuses()  # Propagate status updates
         except Exception as e:
-            print("Error reloading fabricators:", e)
+            print("Error on master change:", e)
 
     def update_all_statuses(self):
-        # Trigger status updates across all tabs
+        """Trigger status updates across all tabs."""
         with db.get_connection() as conn:
             cur = conn.cursor()
             # Update statuses based on transactions
@@ -79,7 +80,7 @@ class FabricTrackerApp(tk.Tk):
                 WHERE batch_id IN (
                     SELECT DISTINCT b.id
                     FROM batches b
-                    JOIN purchases p ON b.batch_ref = p.batch_id
+                    JOIN purchases p ON b.batch_id = p.batch_id
                     JOIN suppliers s ON s.name = p.delivered_to AND s.type = 'knitting_unit'
                 )
             """)
@@ -149,12 +150,12 @@ class FabricTrackerApp(tk.Tk):
             self.reports_frame.reload_data()
 
     def open_dyeing_tab_for_batch(self, dyeer_name, batch_ref):
-        # Proxy to fabricators frame
+        """Proxy to fabricators frame."""
         if hasattr(self.fabricators_frame, "open_dyeing_tab_for_batch"):
             self.fabricators_frame.open_dyeing_tab_for_batch(dyeer_name, batch_ref)
 
     def on_purchase_recorded(self, batch_id, lot_no, delivered_to):
-        # Callback for purchase recording
+        """Callback for purchase recording."""
         if batch_id and delivered_to:
             batch_id_int = db.get_batch_id_by_ref(batch_id)
             if batch_id_int:
@@ -172,9 +173,10 @@ class FabricTrackerApp(tk.Tk):
                         if lot_id:
                             db.update_lot_status(lot_id, "Ordered")
         self.update_all_statuses()
+        self.entries_frame.refresh_lists_callback()  # Refresh lists after purchase
 
     def on_dyeing_output_recorded(self, lot_id):
-        # Callback for dyeing output recording
+        """Callback for dyeing output recording."""
         if lot_id:
             with db.get_connection() as conn:
                 cur = conn.cursor()
@@ -193,6 +195,7 @@ class FabricTrackerApp(tk.Tk):
                     if batch_id:
                         db.update_batch_status(batch_id, "Received")
             self.update_all_statuses()
+        self.entries_frame.refresh_lists_callback()  # Refresh lists after dyeing
 
 if __name__ == "__main__":
     app = FabricTrackerApp()
