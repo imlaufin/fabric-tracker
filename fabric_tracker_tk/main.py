@@ -16,6 +16,16 @@ class FabricTrackerApp(tk.Tk):
         self.geometry("1200x800")
         try:
             db.init_db()  # Initialize database with persistent path
+            # Verify schema migration (optional safeguard)
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("PRAGMA table_info(batches)")
+                columns = [row["name"] for row in cur.fetchall()]
+                if "fabric_type_id" in columns:
+                    print("[DB] Warning: fabric_type_id still exists in batches table. Attempting to drop.", file=sys.stderr)
+                    cur.execute("ALTER TABLE batches DROP COLUMN fabric_type_id")
+                    conn.commit()
+                    print("[DB] Successfully dropped fabric_type_id.", file=sys.stderr)
         except Exception as e:
             print(f"Database initialization failed: {e}", file=sys.stderr)
             self.destroy()
