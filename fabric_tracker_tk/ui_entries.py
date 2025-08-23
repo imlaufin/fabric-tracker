@@ -118,6 +118,7 @@ class EntriesFrame(ttk.Frame):
         ttk.Button(frm, text="Clear (Qty/Lot)", command=self.clear_purchase_form).grid(row=4, column=1, sticky="w")
         ttk.Button(frm, text="Create Batch", command=self.create_batch_dialog).grid(row=4, column=2, sticky="w")
         ttk.Button(frm, text="Reload Lists", command=self.refresh_lists).grid(row=4, column=3, sticky="w")
+        ttk.Button(frm, text="Show Net Price", command=self.show_net_price).grid(row=4, column=4, pady=5, sticky="w")
         self.delivered_cb.bind("<Return>", lambda e: self._snap_autocomplete(self.delivered_cb))
 
     def _snap_autocomplete(self, combo):
@@ -337,17 +338,17 @@ class EntriesFrame(ttk.Frame):
         try:
             if self.selected_purchase_id:
                 db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                db.update_batch_status(batch, 'Ordered')  # Update status on edit
             else:
                 with db.get_connection() as conn:
                     cur = conn.cursor()
-                    # Fetch batch fabric type for composition
                     cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch,))
                     row = cur.fetchone()
                     if row:
                         fabric_type_id = row["fabric_type_id"]
-                        # Record purchase
                         db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
-                        # Apply Rib/Collar consumption if applicable
+                        db.update_batch_status(batch, 'Ordered')  # Update status on new purchase
+                        # Rib/Collar validation (stock check handled by db.py)
                         if includes_rib_collar:
                             cur.execute("""
                                 SELECT yc.yarn_type, yc.ratio
@@ -355,22 +356,11 @@ class EntriesFrame(ttk.Frame):
                                 WHERE yc.fabric_type_id = ? AND (yc.component = 'Rib' OR yc.component = 'Collar')
                             """, (fabric_type_id,))
                             rib_collar_comps = cur.fetchall()
-                            if rib_collar_comps:
-                                for comp in rib_collar_comps:
-                                    yarn_type = comp["yarn_type"]
-                                    ratio = comp["ratio"]
-                                    consumed_kg = rolls * 0.5 * (ratio / 100)  # 0.5 kg per roll example
-                                    cur.execute("""
-                                        UPDATE yarn_stock
-                                        SET qty_kg = qty_kg - ?
-                                        WHERE fabricator = ? AND yarn_type = ? AND qty_kg >= ?
-                                    """, (consumed_kg, delivered, yarn_type, consumed_kg))
-                                    if cur.rowcount == 0:
-                                        messagebox.showerror("Insufficient Stock", f"Not enough {yarn_type} ({consumed_kg} kg) for Rib/Collar at {delivered}.")
-                                        conn.rollback()
-                                        return
+                            if not rib_collar_comps:
+                                messagebox.showwarning("No Composition", "No Rib/Collar composition defined for this batch.")
                     else:
                         db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                        db.update_batch_status(batch, 'Ordered')  # Update status for new batch
         except ValueError as e:
             messagebox.showerror("Invalid Date", str(e))
             return
@@ -608,7 +598,7 @@ class EntriesFrame(ttk.Frame):
                         messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg}) for yarn '{yarn_type}' based on composition.")
                         return
 
-            # Record dyeing output with yarn reduction
+            # Record dyeing output
             try:
                 if self.selected_dyeing_id:
                     cur.execute("""
@@ -623,6 +613,7 @@ class EntriesFrame(ttk.Frame):
                     """, (lot_id, unit_id, db.ui_to_db_date(returned_date), kg, rolls, notes))
                     dyeing_id = cur.lastrowid
                     db.record_dyeing_output(dyeing_id, lot_id)  # Trigger yarn reduction
+                    db.update_lot_status(lot_id, 'Dyed')  # Update status
             except ValueError as e:
                 messagebox.showerror("Invalid Date", str(e))
                 return
@@ -649,6 +640,14 @@ class EntriesFrame(ttk.Frame):
         self.returned_rolls_e.delete(0, tk.END)
         self.returned_notes_e.delete(0, tk.END)
         self.selected_dyeing_id = None
+
+    def show_net_price(self):
+        batch_id = self.batch_e.get().strip()
+        if batch_id:
+            price = db.calculate_net_price(batch_id)
+            messagebox.showinfo("Net Price", f"Total Cost: ${price:.2f}")
+        else:
+            messagebox.showwarning("Missing", "Enter a Batch ID")
 
     def on_purchase_double_click(self, event):
         item = self.tree.selection()
