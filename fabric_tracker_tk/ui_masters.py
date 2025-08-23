@@ -40,17 +40,17 @@ class MastersFrame(ttk.Frame):
 
         # Supplier Section
         supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")
-        supplier_frame.pack(fill="x", pady=5)
+        supplier_frame.place(x=10, y=10)
         self.build_supplier_ui(supplier_frame)
 
         # Yarn Types Section
         yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")
-        yarn_frame.pack(fill="x", pady=5)
+        yarn_frame.place(x=10, y=200)
         self.build_yarn_type_ui(yarn_frame)
 
         # Fabric Compositions Section (combined)
         fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")
-        fabric_comp_frame.pack(fill="x", pady=5)
+        fabric_comp_frame.place(x=10, y=400)
         self.build_fabric_composition_ui(fabric_comp_frame)
 
         # Make frames moveable and resizable
@@ -87,7 +87,7 @@ class MastersFrame(ttk.Frame):
         self.supplier_tree.column("name", width=200)
         self.supplier_tree.column("type", width=150)
         self.supplier_tree.column("color", width=100)
-        self.supplier_tree.pack(fill="x", padx=5, pady=5)
+        self.supplier_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
 
         # Right-click context menu for suppliers
         self.supplier_menu = tk.Menu(self, tearoff=0)
@@ -109,7 +109,7 @@ class MastersFrame(ttk.Frame):
         self.yarn_tree = ttk.Treeview(parent, columns=("name",), show="headings", height=5)
         self.yarn_tree.heading("name", text="Yarn Type")
         self.yarn_tree.column("name", width=100)  # Narrowed from 350 to 100
-        self.yarn_tree.pack(fill="x", padx=5, pady=5)
+        self.yarn_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
 
         # Right-click context menu for yarn types
         self.yarn_menu = tk.Menu(self, tearoff=0)
@@ -156,7 +156,7 @@ class MastersFrame(ttk.Frame):
         self.fabric_comp_tree.column("component", width=100)
         self.fabric_comp_tree.column("yarn_type", width=150)
         self.fabric_comp_tree.column("ratio", width=100)
-        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)
+        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5, sticky="nsew")
 
         # Add resize handle (visual cue)
         self.resize_handle = tk.Label(parent, bg="gray", width=10, height=10)
@@ -423,6 +423,8 @@ class MastersFrame(ttk.Frame):
         x, y = frame.winfo_x() + dx, frame.winfo_y() + dy
         frame.place(x=x, y=y)
         self.frame_positions[frame] = (event.x, event.y)
+        # Update canvas scroll region
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def start_resize(self, event):
         frame = event.widget
@@ -437,6 +439,9 @@ class MastersFrame(ttk.Frame):
         new_height = max(100, self.frame_sizes[frame][1] + dy)
         frame.configure(width=new_width, height=new_height)
         self.frame_sizes[frame] = (new_width, new_height)
+        # Update resize handle and canvas scroll region
+        self.resize_handle.place(relx=1.0, rely=1.0, anchor="se")
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
     def reload_cb_and_notify(self):
         self.load_masters()
