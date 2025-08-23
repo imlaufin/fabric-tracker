@@ -99,22 +99,14 @@ def init_db():
         )
         """)
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS fabric_types (
+        CREATE TABLE IF NOT EXISTS fabric_compositions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE
-        )
-        """)
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS fabric_yarn_composition (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fabric_type_id INTEGER,
+            name TEXT UNIQUE,
             yarn_type_id INTEGER,
             component TEXT,
             quantity REAL,
             ratio REAL,
-            FOREIGN KEY(fabric_type_id) REFERENCES fabric_types(id) ON DELETE CASCADE,
-            FOREIGN KEY(yarn_type_id) REFERENCES yarn_types(id) ON DELETE CASCADE,
-            UNIQUE(fabric_type_id, yarn_type_id, component)
+            FOREIGN KEY(yarn_type_id) REFERENCES yarn_types(id) ON DELETE CASCADE
         )
         """)
         cur.execute("""
@@ -138,15 +130,14 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             batch_ref TEXT UNIQUE,
             fabricator_id INTEGER,
-            fabric_type_id INTEGER,
+            fabric_type_name TEXT,
             expected_lots INTEGER DEFAULT 0,
             composition TEXT,
             status TEXT DEFAULT 'Ordered',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             dyeing_unit_id INTEGER,
             FOREIGN KEY(fabricator_id) REFERENCES suppliers(id),
-            FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id),
-            FOREIGN KEY(fabric_type_id) REFERENCES fabric_types(id)
+            FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id)
         )
         """)
         cur.execute("""
@@ -185,33 +176,45 @@ def init_db():
         )
         """)
 
-        # Migration: Add missing columns with data consistency
-        cur.execute("PRAGMA table_info(lots)")
+        # Migration: Handle old fabric_types and fabric_yarn_composition
+        cur.execute("PRAGMA table_info(fabric_compositions)")
         columns = [row["name"] for row in cur.fetchall()]
-        if "weight_kg" not in columns:
-            cur.execute("ALTER TABLE lots ADD COLUMN weight_kg REAL")
-        if "status" not in columns:
-            cur.execute("ALTER TABLE lots ADD COLUMN status TEXT DEFAULT 'Ordered'")
+        if "name" not in columns:
+            cur.execute("ALTER TABLE fabric_compositions ADD COLUMN name TEXT")
+            # Migrate data from fabric_types
+            cur.execute("SELECT name FROM fabric_types")
+            old_fabric_types = cur.fetchall()
+            for ft in old_fabric_types:
+                cur.execute("INSERT INTO fabric_compositions (name) VALUES (?)", (ft["name"],))
+            # Migrate data from fabric_yarn_composition
+            cur.execute("""
+                SELECT ft.name AS fabric_name, yt.name AS yarn_name, fyc.component, fyc.ratio
+                FROM fabric_yarn_composition fyc
+                JOIN fabric_types ft ON fyc.fabric_type_id = ft.id
+                JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
+            """)
+            comps = cur.fetchall()
+            for comp in comps:
+                cur.execute("""
+                    UPDATE fabric_compositions
+                    SET yarn_type_id = (SELECT id FROM yarn_types WHERE name = ?),
+                        component = ?, ratio = ?
+                    WHERE name = ?
+                """, (comp["yarn_name"], comp["component"], comp["ratio"], comp["fabric_name"]))
+            # Drop old tables
+            cur.execute("DROP TABLE IF EXISTS fabric_types")
+            cur.execute("DROP TABLE IF EXISTS fabric_yarn_composition")
 
+        # Migration: Update batches to use fabric_type_name
         cur.execute("PRAGMA table_info(batches)")
         columns = [row["name"] for row in cur.fetchall()]
-        if "fabric_type_id" not in columns:
-            cur.execute("ALTER TABLE batches ADD COLUMN fabric_type_id INTEGER")
-            cur.execute("UPDATE batches SET fabric_type_id = NULL WHERE fabric_type_id IS NULL")
-        if "dyeing_unit_id" not in columns:
-            cur.execute("ALTER TABLE batches ADD COLUMN dyeing_unit_id INTEGER")
-            cur.execute("UPDATE batches SET dyeing_unit_id = NULL WHERE dyeing_unit_id IS NULL")
-
-        cur.execute("PRAGMA table_info(purchases)")
-        columns = [row["name"] for row in cur.fetchall()]
-        if "includes_rib_collar" not in columns:
-            cur.execute("ALTER TABLE purchases ADD COLUMN includes_rib_collar INTEGER DEFAULT 0")
-
-        cur.execute("PRAGMA table_info(fabric_yarn_composition)")
-        columns = [row["name"] for row in cur.fetchall()]
-        if "component" not in columns:
-            cur.execute("ALTER TABLE fabric_yarn_composition ADD COLUMN component TEXT")
-            cur.execute("UPDATE fabric_yarn_composition SET component = 'Main Fabric' WHERE component IS NULL")
+        if "fabric_type_name" not in columns:
+            cur.execute("ALTER TABLE batches ADD COLUMN fabric_type_name TEXT")
+            cur.execute("""
+                UPDATE batches
+                SET fabric_type_name = (SELECT name FROM fabric_types WHERE id = fabric_type_id)
+            """)
+            cur.execute("ALTER TABLE batches DROP COLUMN fabric_type_id")
 
         # Indexes
         cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
@@ -219,10 +222,9 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_suppliers_type ON suppliers(type)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_yarn_types_name ON yarn_types(name)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_fabric_types_name ON fabric_types(name)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fabric_compositions_name ON fabric_compositions(name)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_lots_lot_no ON lots(lot_no)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_lot_no ON purchases(lot_no)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_fabric_yarn_composition ON fabric_yarn_composition(fabric_type_id, yarn_type_id, component)")
 
         conn.commit()
 
@@ -286,7 +288,7 @@ def list_suppliers(supplier_type=None):
         else:
             cur.execute("SELECT id, name, type, color_code FROM suppliers ORDER BY name")
         rows = cur.fetchall()
-    return rows
+    return rows  # UI can render this as movable/resizable boxes
 
 def search_suppliers_prefix(prefix: str, supplier_type: str = None, limit: int = 20):
     prefix = (prefix or "").strip()
@@ -390,7 +392,7 @@ def is_delivered_to_valid(name):
 def list_yarn_types():
     with get_connection() as conn:
         rows = [r["name"] for r in conn.execute("SELECT DISTINCT name FROM yarn_types ORDER BY name").fetchall()]
-    return rows
+    return rows  # UI can render as narrow, resizable box
 
 def add_yarn_type(name: str):
     if not name or not name.strip():
@@ -409,7 +411,7 @@ def search_yarn_types_prefix(prefix: str, limit: int = 20):
     return rows
 
 def delete_yarn_type(name: str):
-    """Delete a yarn type if not referenced in purchases or fabric_yarn_composition."""
+    """Delete a yarn type if not referenced in purchases or fabric_compositions."""
     if not name or not name.strip():
         return False
     with get_connection() as conn:
@@ -417,7 +419,7 @@ def delete_yarn_type(name: str):
         cur.execute("SELECT COUNT(*) FROM purchases WHERE yarn_type=?", (name.strip(),))
         if cur.fetchone()[0] > 0:
             return False
-        cur.execute("SELECT COUNT(*) FROM fabric_yarn_composition WHERE yarn_type_id IN (SELECT id FROM yarn_types WHERE name=?)", (name.strip(),))
+        cur.execute("SELECT COUNT(*) FROM fabric_compositions WHERE yarn_type_id IN (SELECT id FROM yarn_types WHERE name=?)", (name.strip(),))
         if cur.fetchone()[0] > 0:
             return False
         cur.execute("DELETE FROM yarn_types WHERE name=?", (name.strip(),))
@@ -425,79 +427,69 @@ def delete_yarn_type(name: str):
     return True
 
 # ----------------------------
-# Fabric Types
+# Fabric Compositions
 # ----------------------------
-def list_fabric_types():
-    with get_connection() as conn:
-        rows = [r["name"] for r in conn.execute("SELECT DISTINCT name FROM fabric_types ORDER BY name").fetchall()]
-    return rows
-
-def add_fabric_type(name: str):
-    if not name or not name.strip():
-        return
-    with get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO fabric_types (name) VALUES (?)", (name.strip(),))
-        conn.commit()
-
-def search_fabric_types_prefix(prefix: str, limit: int = 20):
-    prefix = (prefix or "").strip()
-    like = _escape_like(prefix) + "%"
-    with get_connection() as conn:
-        rows = [r["name"] for r in conn.execute(
-            r"SELECT name FROM fabric_types WHERE name LIKE ? ESCAPE '\' ORDER BY name LIMIT ?", (like, limit)
-        ).fetchall()]
-    return rows
-
-def delete_fabric_type(name: str):
-    """Delete a fabric type if not referenced in batches or fabric_yarn_composition."""
-    if not name or not name.strip():
-        return False
+def list_fabric_compositions():
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM batches WHERE fabric_type_id IN (SELECT id FROM fabric_types WHERE name=?)", (name.strip(),))
-        if cur.fetchone()[0] > 0:
-            return False
-        cur.execute("SELECT COUNT(*) FROM fabric_yarn_composition WHERE fabric_type_id IN (SELECT id FROM fabric_types WHERE name=?)", (name.strip(),))
-        if cur.fetchone()[0] > 0:
-            return False
-        cur.execute("DELETE FROM fabric_types WHERE name=?", (name.strip(),))
-        conn.commit()
-    return True
+        cur.execute("""
+            SELECT fc.name, yt.name AS yarn_type, fc.component, fc.ratio
+            FROM fabric_compositions fc
+            LEFT JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+            ORDER BY fc.name
+        """)
+        return cur.fetchall()  # UI can render as combined, resizable box
 
-def add_fabric_yarn_composition(fabric_type_name, yarn_type_name, ratio, component="Main Fabric"):
-    """Add or update a fabric-yarn composition entry with component (Main Fabric, Rib, Collar)."""
+def add_fabric_composition(name: str, yarn_type_name: str, ratio: float, component="Main Fabric"):
+    """Add or update a fabric composition entry."""
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM fabric_types WHERE name=?", (fabric_type_name,))
-        fabric_type_id = cur.fetchone()
-        if not fabric_type_id:
-            raise ValueError(f"Fabric type '{fabric_type_name}' not found.")
-        fabric_type_id = fabric_type_id["id"]
-
         cur.execute("SELECT id FROM yarn_types WHERE name=?", (yarn_type_name,))
         yarn_type_id = cur.fetchone()
         if not yarn_type_id:
             raise ValueError(f"Yarn type '{yarn_type_name}' not found.")
         yarn_type_id = yarn_type_id["id"]
 
+        # Check and adjust total ratio
+        cur.execute("SELECT SUM(ratio) AS total FROM fabric_compositions WHERE name=?", (name,))
+        total_ratio = cur.fetchone()["total"] or 0
+        if total_ratio + ratio > 100:
+            raise ValueError("Total ratio cannot exceed 100% after adding this composition.")
+
         cur.execute("""
-            INSERT OR REPLACE INTO fabric_yarn_composition (fabric_type_id, yarn_type_id, component, ratio)
+            INSERT OR REPLACE INTO fabric_compositions (name, yarn_type_id, component, ratio)
             VALUES (?, ?, ?, ?)
-        """, (fabric_type_id, yarn_type_id, component, ratio))
+        """, (name, yarn_type_id, component, ratio))
         conn.commit()
 
-def get_fabric_yarn_composition(fabric_type_name):
-    """Retrieve yarn composition for a given fabric type, including component."""
+def search_fabric_compositions_prefix(prefix: str, limit: int = 20):
+    prefix = (prefix or "").strip()
+    like = _escape_like(prefix) + "%"
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-            FROM fabric_yarn_composition fyc
-            JOIN fabric_types ft ON fyc.fabric_type_id = ft.id
-            JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-            WHERE ft.name = ?
-        """, (fabric_type_name,))
+        cur.execute(r"""
+            SELECT fc.name, yt.name AS yarn_type, fc.component, fc.ratio
+            FROM fabric_compositions fc
+            LEFT JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+            WHERE fc.name LIKE ? ESCAPE '\' ORDER BY fc.name LIMIT ?
+        """, (like, limit))
         return cur.fetchall()
+
+def delete_fabric_composition(name: str, component: str, yarn_type_name: str):
+    """Delete a specific composition entry if not referenced in batches."""
+    if not name or not name.strip() or not component or not yarn_type_name:
+        return False
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM batches WHERE fabric_type_name=?", (name.strip(),))
+        if cur.fetchone()[0] > 0:
+            return False
+        cur.execute("""
+            DELETE FROM fabric_compositions
+            WHERE name=? AND component=? AND yarn_type_id=(SELECT id FROM yarn_types WHERE name=?)
+        """, (name.strip(), component, yarn_type_name))
+        conn.commit()
+    return True
 
 # ----------------------------
 # Fabricators / Batches / Lots
@@ -525,27 +517,25 @@ def create_batch(batch_ref, fabricator_id, fabric_type_name, expected_lots, comp
     """Create a batch with a specified fabric type."""
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM fabric_types WHERE name=?", (fabric_type_name,))
-        fabric_type_id = cur.fetchone()
-        if not fabric_type_id:
+        cur.execute("SELECT 1 FROM fabric_compositions WHERE name=?", (fabric_type_name,))
+        if not cur.fetchone():
             raise ValueError(f"Fabric type '{fabric_type_name}' not found.")
-        fabric_type_id = fabric_type_id["id"]
-
+        
         cur.execute("""
-            INSERT INTO batches (batch_ref, fabricator_id, fabric_type_id, expected_lots, composition, dyeing_unit_id)
+            INSERT INTO batches (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (batch_ref, fabricator_id, fabric_type_id, expected_lots, composition, dyeing_unit_id))
+        """, (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id))
         bid = cur.lastrowid
         conn.commit()  # Commit batch immediately
 
-        # Parse composition and add to fabric_yarn_composition
+        # Parse composition and add to fabric_compositions
         if composition:
             has_rib = "Yes" in composition.split("Rib: ")[1].split(",")[0]
             has_collar = "Yes" in composition.split("Collar: ")[1].split(",")[0]
             if has_rib:
-                add_fabric_yarn_composition(fabric_type_name, "Rib Yarn", 20.0, "Rib")
+                add_fabric_composition(fabric_type_name, "Rib Yarn", 20.0, "Rib")
             if has_collar:
-                add_fabric_yarn_composition(fabric_type_name, "Collar Yarn", 20.0, "Collar")
+                add_fabric_composition(fabric_type_name, "Collar Yarn", 20.0, "Collar")
 
         for i in range(1, expected_lots + 1):
             create_lot(bid, i)
@@ -597,14 +587,14 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                cur.execute("SELECT id FROM fabric_types LIMIT 1")
-                fabric_type_id = cur.fetchone()["id"] if cur.fetchone() else None
-                if not fabric_type_id:
+                cur.execute("SELECT name FROM fabric_compositions LIMIT 1")
+                fabric_type_name = cur.fetchone()["name"] if cur.fetchone() else None
+                if not fabric_type_name:
                     raise ValueError("No fabric type defined.")
                 cur.execute("""
-                    INSERT INTO batches (batch_ref, fabricator_id, fabric_type_id, expected_lots, composition)
+                    INSERT INTO batches (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition)
                     VALUES (?, ?, ?, ?, ?)
-                """, (batch_id, fabricator_id, fabric_type_id, 1, ""))
+                """, (batch_id, fabricator_id, fabric_type_name, 1, ""))
                 bid = cur.lastrowid
                 conn.commit()  # Commit batch
                 lot_no = f"{batch_id}/1"
@@ -639,16 +629,16 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
 
             # Apply Rib/Collar consumption if flagged
             if includes_rib_collar:
-                cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch_id,))
+                cur.execute("SELECT fabric_type_name FROM batches WHERE batch_ref = ?", (batch_id,))
                 row = cur.fetchone()
                 if row:
-                    fabric_type_id = row["fabric_type_id"]
+                    fabric_type_name = row["fabric_type_name"]
                     cur.execute("""
-                        SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                        FROM fabric_yarn_composition fyc
-                        JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                        WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Rib', 'Collar')
-                    """, (fabric_type_id,))
+                        SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                        FROM fabric_compositions fc
+                        JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                        WHERE fc.name = ? AND fc.component IN ('Rib', 'Collar')
+                    """, (fabric_type_name,))
                     rib_collar_comps = cur.fetchall()
                     if rib_collar_comps:
                         for comp in rib_collar_comps:
@@ -711,16 +701,16 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
                 WHERE fabricator = ? AND yarn_type = ?
             """, (orig_kg, orig_delivered, orig_yarn))
             if orig_rib_collar:
-                cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch_id,))
+                cur.execute("SELECT fabric_type_name FROM batches WHERE batch_ref = ?", (batch_id,))
                 row = cur.fetchone()
                 if row:
-                    fabric_type_id = row["fabric_type_id"]
+                    fabric_type_name = row["fabric_type_name"]
                     cur.execute("""
-                        SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                        FROM fabric_yarn_composition fyc
-                        JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                        WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Rib', 'Collar')
-                    """, (fabric_type_id,))
+                        SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                        FROM fabric_compositions fc
+                        JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                        WHERE fc.name = ? AND fc.component IN ('Rib', 'Collar')
+                    """, (fabric_type_name,))
                     rib_collar_comps = cur.fetchall()
                     for comp in rib_collar_comps:
                         rib_collar_yarn = comp["yarn_type"]
@@ -751,16 +741,16 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
                 WHERE fabricator = ? AND yarn_type = ?
             """, (qty_kg, delivered_to, yarn_type))
             if includes_rib_collar:
-                cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch_id,))
+                cur.execute("SELECT fabric_type_name FROM batches WHERE batch_ref = ?", (batch_id,))
                 row = cur.fetchone()
                 if row:
-                    fabric_type_id = row["fabric_type_id"]
+                    fabric_type_name = row["fabric_type_name"]
                     cur.execute("""
-                        SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                        FROM fabric_yarn_composition fyc
-                        JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                        WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Rib', 'Collar')
-                    """, (fabric_type_id,))
+                        SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                        FROM fabric_compositions fc
+                        JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                        WHERE fc.name = ? AND fc.component IN ('Rib', 'Collar')
+                    """, (fabric_type_name,))
                     rib_collar_comps = cur.fetchall()
                     for comp in rib_collar_comps:
                         rib_collar_yarn = comp["yarn_type"]
@@ -804,16 +794,16 @@ def delete_purchase(purchase_id: int):
                     WHERE fabricator = ? AND yarn_type = ?
                 """, (qty_kg, delivered_to, yarn_type))
                 if includes_rib_collar:
-                    cur.execute("SELECT fabric_type_id FROM batches WHERE batch_ref = ?", (batch_id,))
+                    cur.execute("SELECT fabric_type_name FROM batches WHERE batch_ref = ?", (batch_id,))
                     row = cur.fetchone()
                     if row:
-                        fabric_type_id = row["fabric_type_id"]
+                        fabric_type_name = row["fabric_type_name"]
                         cur.execute("""
-                            SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                            FROM fabric_yarn_composition fyc
-                            JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                            WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Rib', 'Collar')
-                        """, (fabric_type_id,))
+                            SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                            FROM fabric_compositions fc
+                            JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                            WHERE fc.name = ? AND fc.component IN ('Rib', 'Collar')
+                        """, (fabric_type_name,))
                         rib_collar_comps = cur.fetchall()
                         for comp in rib_collar_comps:
                             rib_collar_yarn = comp["yarn_type"]
@@ -866,14 +856,14 @@ def record_dyeing_output(lot_id, returned_date, returned_qty_kg, returned_qty_ro
         if lot_data:
             weight_kg = lot_data["weight_kg"] or 0
             lot_no = lot_data["lot_no"]
-            cur.execute("SELECT fabric_type_id FROM batches WHERE id=?", (batch_id,))
-            fabric_type_id = cur.fetchone()["fabric_type_id"]
+            cur.execute("SELECT fabric_type_name FROM batches WHERE id=?", (batch_id,))
+            fabric_type_name = cur.fetchone()["fabric_type_name"]
             cur.execute("""
-                SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                FROM fabric_yarn_composition fyc
-                JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Main Fabric', 'Rib', 'Collar')
-            """, (fabric_type_id,))
+                SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                FROM fabric_compositions fc
+                JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                WHERE fc.name = ? AND fc.component IN ('Main Fabric', 'Rib', 'Collar')
+            """, (fabric_type_name,))
             compositions = cur.fetchall()
             for comp in compositions:
                 yarn_type = comp["yarn_type"]
@@ -919,14 +909,14 @@ def delete_dyeing_output(dyeing_id: int):
             # Adjust stock
             cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
             batch_id = cur.fetchone()["batch_id"]
-            cur.execute("SELECT fabric_type_id FROM batches WHERE id=?", (batch_id,))
-            fabric_type_id = cur.fetchone()["fabric_type_id"]
+            cur.execute("SELECT fabric_type_name FROM batches WHERE id=?", (batch_id,))
+            fabric_type_name = cur.fetchone()["fabric_type_name"]
             cur.execute("""
-                SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
-                FROM fabric_yarn_composition fyc
-                JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
-                WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Main Fabric', 'Rib', 'Collar')
-            """, (fabric_type_id,))
+                SELECT yt.name AS yarn_type, fc.component, fc.ratio
+                FROM fabric_compositions fc
+                JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                WHERE fc.name = ? AND fc.component IN ('Main Fabric', 'Rib', 'Collar')
+            """, (fabric_type_name,))
             compositions = cur.fetchall()
             for comp in compositions:
                 yarn_type = comp["yarn_type"]
