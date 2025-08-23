@@ -344,6 +344,11 @@ class MastersFrame(ttk.Frame):
             ratio = float(ratio_str)
             if ratio <= 0 or ratio > 100:
                 raise ValueError("Ratio must be between 0 and 100.")
+            compositions = db.get_fabric_yarn_composition(fabric_name)
+            existing_ratio = next((comp["ratio"] for comp in compositions if comp["component"] == component and comp["yarn_type"] == yarn_name), 0)
+            total_ratio = sum(comp["ratio"] for comp in compositions) - existing_ratio + ratio
+            if total_ratio > 100:
+                raise ValueError("Total ratio cannot exceed 100%.")
             db.add_fabric_yarn_composition(fabric_name, yarn_name, ratio, component)
             messagebox.showinfo("Saved", f"Composition for {fabric_name} ({component}) updated.")
             self.load_composition()
