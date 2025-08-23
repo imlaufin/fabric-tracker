@@ -237,7 +237,6 @@ def init_db():
 
         conn.commit()
         print("[DB] New DB created and initialized." if created else "[DB] DB init/migrations complete.")
-
 # ----------------------------
 # Date Helpers
 # ----------------------------
@@ -385,7 +384,6 @@ def is_delivered_to_valid(name):
     with get_connection() as conn:
         exists = conn.execute("SELECT 1 FROM suppliers WHERE name=? LIMIT 1", (name.strip(),)).fetchone() is not None
     return exists
-
 # ----------------------------
 # Yarn Types
 # ----------------------------
@@ -539,6 +537,16 @@ def create_batch(batch_ref, fabricator_id, fabric_type_name, expected_lots, comp
         """, (batch_ref, fabricator_id, fabric_type_id, expected_lots, composition, dyeing_unit_id))
         bid = cur.lastrowid
         conn.commit()  # Commit batch immediately
+
+        # Parse composition and add to fabric_yarn_composition
+        if composition:
+            has_rib = "Yes" in composition.split("Rib: ")[1].split(",")[0]
+            has_collar = "Yes" in composition.split("Collar: ")[1].split(",")[0]
+            if has_rib:
+                add_fabric_yarn_composition(fabric_type_name, "Rib Yarn", 20.0, "Rib")
+            if has_collar:
+                add_fabric_yarn_composition(fabric_type_name, "Collar Yarn", 20.0, "Collar")
+
         for i in range(1, expected_lots + 1):
             create_lot(bid, i)
     return bid
@@ -585,7 +593,7 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         cur = conn.cursor()
 
         # Create batch (and its first lot) if they don't exist
-        if not batch_id:
+        if not batch_id or not get_batch_id_by_ref(batch_id):
             fabricator_id = get_supplier_id_by_name(delivered_to, "knitting_unit")
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -613,10 +621,8 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
         """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar))
         purchase_id = cur.lastrowid
 
-        # Update stock and apply Rib/Collar consumption
-        fabricator_id = get_supplier_id_by_name(delivered_to)
-        if fabricator_id:
-            # Update main yarn stock
+        # Update stock
+        if delivered_to:
             cur.execute("""
                 INSERT OR IGNORE INTO yarn_stock (fabricator, yarn_type, qty_kg)
                 VALUES (?, ?, ?)
@@ -663,21 +669,19 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
                                 WHERE fabricator = ? AND yarn_type = ?
                             """, (consumed_kg, delivered_to, rib_collar_yarn))
 
-        # Update lot weight and status within the same connection
+        # Update lot weight and status
         lot_id = get_lot_id_by_no(lot_no)
         if lot_id:
             cur.execute("UPDATE lots SET weight_kg=?, status='Ordered' WHERE id=?", (qty_kg, lot_id))
-
-        # Update batch status based on delivery
         batch_id_int = get_batch_id_by_ref(batch_id)
         if batch_id_int:
-            cur.execute("UPDATE batches SET status='Ordered' WHERE id=?", (batch_id_int,))
+            update_batch_status(batch_id_int, 'Ordered')
             if lot_id:
-                cur.execute("UPDATE lots SET status='Ordered' WHERE id=?", (lot_id,))
+                update_lot_status(lot_id, 'Ordered')
             if delivered_to and get_supplier_id_by_name(delivered_to, "knitting_unit"):
-                cur.execute("UPDATE batches SET status='Knitted' WHERE id=?", (batch_id_int,))
+                update_batch_status(batch_id_int, 'Knitted')
                 if lot_id:
-                    cur.execute("UPDATE lots SET status='Knitted' WHERE id=?", (lot_id,))
+                    update_lot_status(lot_id, 'Knitted')
 
         conn.commit()
     return purchase_id
@@ -856,35 +860,92 @@ def record_dyeing_output(lot_id, returned_date, returned_qty_kg, returned_qty_ro
         """, (resolved_lot_id, dyeing_unit_id, ui_to_db_date(returned_date), returned_qty_kg, returned_qty_rolls, notes))
         dyeing_output_id = cur.lastrowid
 
+        # Update stock
+        cur.execute("SELECT weight_kg, lot_no FROM lots WHERE id=?", (resolved_lot_id,))
+        lot_data = cur.fetchone()
+        if lot_data:
+            weight_kg = lot_data["weight_kg"] or 0
+            lot_no = lot_data["lot_no"]
+            cur.execute("SELECT fabric_type_id FROM batches WHERE id=?", (batch_id,))
+            fabric_type_id = cur.fetchone()["fabric_type_id"]
+            cur.execute("""
+                SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
+                FROM fabric_yarn_composition fyc
+                JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
+                WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Main Fabric', 'Rib', 'Collar')
+            """, (fabric_type_id,))
+            compositions = cur.fetchall()
+            for comp in compositions:
+                yarn_type = comp["yarn_type"]
+                ratio = comp["ratio"]
+                consumed_kg = returned_qty_kg * (ratio / 100)
+                cur.execute("""
+                    INSERT OR IGNORE INTO yarn_stock (fabricator, yarn_type, qty_kg)
+                    VALUES (?, ?, 0)
+                """, (dyeing_unit_name or "Unknown", yarn_type))
+                cur.execute("SELECT qty_kg FROM yarn_stock WHERE fabricator = ? AND yarn_type = ?", (dyeing_unit_name or "Unknown", yarn_type))
+                current_stock = cur.fetchone()["qty_kg"]
+                if current_stock - consumed_kg < 0:
+                    raise ValueError(f"Insufficient {yarn_type} stock ({current_stock} kg) at {dyeing_unit_name or 'Unknown'}")
+                cur.execute("""
+                    UPDATE yarn_stock
+                    SET qty_kg = qty_kg - ?
+                    WHERE fabricator = ? AND yarn_type = ?
+                """, (consumed_kg, dyeing_unit_name or "Unknown", yarn_type))
+
         # Update lot status based on completion
-        cur.execute("SELECT weight_kg FROM lots WHERE id=?", (resolved_lot_id,))
-        weight_kg = cur.fetchone()["weight_kg"] or 0
-        if returned_qty_kg >= 0.9 * weight_kg:
-            cur.execute("UPDATE lots SET status='Received' WHERE id=?", (resolved_lot_id,))
-            cur.execute("UPDATE batches SET status='Received' WHERE id=?", (batch_id,))
+        if lot_data and returned_qty_kg >= 0.9 * weight_kg:
+            update_lot_status(resolved_lot_id, 'Received')
+            update_batch_status(batch_id, 'Received')
         elif returned_qty_kg > 0:
-            cur.execute("UPDATE lots SET status='Dyed' WHERE id=?", (resolved_lot_id,))
-            cur.execute("UPDATE batches SET status='Dyed' WHERE id=?", (batch_id,))
+            update_lot_status(resolved_lot_id, 'Dyed')
+            update_batch_status(batch_id, 'Dyed')
+
         conn.commit()
     return dyeing_output_id
 
 def delete_dyeing_output(dyeing_id: int):
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT lot_id FROM dyeing_outputs WHERE id=?", (dyeing_id,))
+        cur.execute("SELECT lot_id, returned_qty_kg, dyeing_unit_id FROM dyeing_outputs WHERE id=?", (dyeing_id,))
         row = cur.fetchone()
         if row:
             lot_id = row["lot_id"]
+            returned_qty_kg = row["returned_qty_kg"]
+            dyeing_unit_id = row["dyeing_unit_id"]
+            cur.execute("SELECT name FROM suppliers WHERE id=?", (dyeing_unit_id,))
+            dyeing_unit_name = cur.fetchone()["name"] if dyeing_unit_id else "Unknown"
+
+            # Adjust stock
+            cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
+            batch_id = cur.fetchone()["batch_id"]
+            cur.execute("SELECT fabric_type_id FROM batches WHERE id=?", (batch_id,))
+            fabric_type_id = cur.fetchone()["fabric_type_id"]
+            cur.execute("""
+                SELECT yt.name AS yarn_type, fyc.component, fyc.ratio
+                FROM fabric_yarn_composition fyc
+                JOIN yarn_types yt ON fyc.yarn_type_id = yt.id
+                WHERE fyc.fabric_type_id = ? AND fyc.component IN ('Main Fabric', 'Rib', 'Collar')
+            """, (fabric_type_id,))
+            compositions = cur.fetchall()
+            for comp in compositions:
+                yarn_type = comp["yarn_type"]
+                ratio = comp["ratio"]
+                consumed_kg = returned_qty_kg * (ratio / 100)
+                cur.execute("""
+                    UPDATE yarn_stock
+                    SET qty_kg = qty_kg + ?
+                    WHERE fabricator = ? AND yarn_type = ?
+                """, (consumed_kg, dyeing_unit_name, yarn_type))
+
             cur.execute("DELETE FROM dyeing_outputs WHERE id=?", (dyeing_id,))
             # Revert lot and batch status if no other dyeing outputs exist
             cur.execute("SELECT COUNT(*) FROM dyeing_outputs WHERE lot_id=?", (lot_id,))
             if cur.fetchone()[0] == 0:
-                cur.execute("UPDATE lots SET status='Knitted' WHERE id=?", (lot_id,))
-                cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
-                batch_id = cur.fetchone()["batch_id"]
+                update_lot_status(lot_id, 'Knitted')
                 cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
                 min_status = cur.fetchone()["min_status"]
-                cur.execute("UPDATE batches SET status=? WHERE id=?", (min_status, batch_id,))
+                update_batch_status(batch_id, min_status)
         conn.commit()
 
 # Helper function to get batch_id by reference
