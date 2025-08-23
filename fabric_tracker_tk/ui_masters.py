@@ -167,8 +167,15 @@ class MastersFrame(ttk.Frame):
             self.chosen_color = color[1]
             style_name = "Custom.TButton"
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color, foreground="white")
+            s.configure(style_name, background=self.chosen_color, foreground="white" if self.is_light_color(self.chosen_color) else "black")
             self.supplier_color_btn.configure(text=self.chosen_color, style=style_name)
+
+    def is_light_color(self, hex_color):
+        # Simple luminance check for text color contrast
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        return luminance > 0.5
 
     def add_or_update_supplier(self):
         name = self.supplier_name_entry.get().strip()
@@ -179,16 +186,19 @@ class MastersFrame(ttk.Frame):
         type_map = {t[0]: t[1] for t in MASTER_TYPES}
         mtype = type_map.get(type_label, "yarn_supplier")
         color_hex = self.chosen_color
-        db.add_master(name, mtype, color_hex)
-        db.update_master_color_and_type(name, mtype, color_hex)
-        messagebox.showinfo("Saved", f"{name} saved/updated.")
-        self.supplier_name_entry.delete(0, tk.END)
-        self.supplier_type_cb.current(0)
-        self.chosen_color = ""
-        self.supplier_color_btn.configure(text="Choose", style="TButton")
-        self.load_masters()
-        if self.on_change_callback:
-            self.on_change_callback()
+        try:
+            db.add_master(name, mtype, color_hex)
+            db.update_master_color_and_type(name, mtype, color_hex)
+            messagebox.showinfo("Saved", f"{name} saved/updated.")
+            self.supplier_name_entry.delete(0, tk.END)
+            self.supplier_type_cb.current(0)
+            self.chosen_color = ""
+            self.supplier_color_btn.configure(text="Choose", style="TButton")
+            self.load_masters()
+            if self.on_change_callback:
+                self.on_change_callback()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save supplier: {str(e)}")
 
     def delete_supplier(self):
         sel = self.supplier_tree.selection()
@@ -218,7 +228,7 @@ class MastersFrame(ttk.Frame):
         style_name = "Custom.TButton" if self.chosen_color else "TButton"
         if self.chosen_color:
             s = ttk.Style()
-            s.configure(style_name, background=self.chosen_color, foreground="white")
+            s.configure(style_name, background=self.chosen_color, foreground="white" if self.is_light_color(self.chosen_color) else "black")
         self.supplier_color_btn.configure(text=color or "Choose", style=style_name)
 
     def show_supplier_context_menu(self, event):
@@ -232,12 +242,15 @@ class MastersFrame(ttk.Frame):
         if not name:
             messagebox.showwarning("Missing", "Name required")
             return
-        db.add_yarn_type(name)
-        messagebox.showinfo("Saved", f"{name} saved/updated.")
-        self.yarn_name_entry.delete(0, tk.END)
-        self.load_masters()
-        if self.on_change_callback:
-            self.on_change_callback()
+        try:
+            db.add_yarn_type(name)
+            messagebox.showinfo("Saved", f"{name} saved/updated.")
+            self.yarn_name_entry.delete(0, tk.END)
+            self.load_masters()
+            if self.on_change_callback:
+                self.on_change_callback()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save yarn type: {str(e)}")
 
     def delete_yarn_type(self):
         sel = self.yarn_tree.selection()
@@ -270,12 +283,15 @@ class MastersFrame(ttk.Frame):
         if not name:
             messagebox.showwarning("Missing", "Name required")
             return
-        db.add_fabric_type(name)
-        messagebox.showinfo("Saved", f"{name} saved/updated.")
-        self.fabric_name_entry.delete(0, tk.END)
-        self.load_masters()
-        if self.on_change_callback:
-            self.on_change_callback()
+        try:
+            db.add_fabric_type(name)
+            messagebox.showinfo("Saved", f"{name} saved/updated.")
+            self.fabric_name_entry.delete(0, tk.END)
+            self.load_masters()
+            if self.on_change_callback:
+                self.on_change_callback()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save fabric type: {str(e)}")
 
     def delete_fabric_type(self):
         sel = self.fabric_tree.selection()
@@ -320,11 +336,14 @@ class MastersFrame(ttk.Frame):
         fabric_name = self.comp_fabric_cb.get()
         component = self.comp_component_cb.get()
         yarn_name = self.comp_yarn_cb.get()
-        ratio = float(self.ratio_entry.get()) if self.ratio_entry.get().strip() else 0.0
-        if not fabric_name or not yarn_name or ratio <= 0 or ratio > 100:
-            messagebox.showwarning("Missing", "All fields (Fabric, Component, Yarn, Ratio) are required, and Ratio must be between 0 and 100.")
+        ratio_str = self.ratio_entry.get().strip()
+        if not fabric_name or not yarn_name or not ratio_str:
+            messagebox.showwarning("Missing", "All fields (Fabric, Component, Yarn, Ratio) are required.")
             return
         try:
+            ratio = float(ratio_str)
+            if ratio <= 0 or ratio > 100:
+                raise ValueError("Ratio must be between 0 and 100.")
             db.add_fabric_yarn_composition(fabric_name, yarn_name, ratio, component)
             messagebox.showinfo("Saved", f"Composition for {fabric_name} ({component}) updated.")
             self.load_composition()
@@ -332,6 +351,8 @@ class MastersFrame(ttk.Frame):
                 self.on_change_callback()
         except ValueError as e:
             messagebox.showerror("Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save composition: {str(e)}")
 
     def delete_composition(self):
         selected = self.comp_tree.selection()
@@ -354,11 +375,12 @@ class MastersFrame(ttk.Frame):
                 self.on_change_callback()
 
     def load_masters(self):
-        # Clear all trees
+        # Clear all trees and images
         for tree in [self.supplier_tree, self.yarn_tree, self.fabric_tree]:
             for r in tree.get_children():
                 tree.delete(r)
         self.color_imgs.clear()
+        self.comp_tree.delete(*self.comp_tree.get_children())
 
         # Load Suppliers
         for row in db.list_suppliers():
