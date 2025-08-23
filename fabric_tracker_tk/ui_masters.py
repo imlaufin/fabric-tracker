@@ -29,12 +29,12 @@ class MastersFrame(ttk.Frame):
 
     def build_ui(self):
         # Main canvas with scrollbar
-        self.canvas = tk.Canvas(self, bg="white", width=800, height=600)  # Set initial size
+        self.canvas = tk.Canvas(self, bg="white", width=800, height=1000)  # Larger initial size
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.inner_frame = ttk.Frame(self.canvas, width=780, height=580)  # Set initial size
+        self.inner_frame = ttk.Frame(self.canvas)  # Remove fixed size
         self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
         self.inner_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         print(f"[DEBUG] Canvas created with scrollregion: {self.canvas.bbox('all')}")
@@ -56,10 +56,6 @@ class MastersFrame(ttk.Frame):
         fabric_comp_frame.place(x=10, y=400, width=760, height=180)  # Minimum size
         print(f"[DEBUG] Fabric comp frame placed at (10, 400)")
         self.build_fabric_composition_ui(fabric_comp_frame)
-
-        # Force scroll region update
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        print(f"[DEBUG] Updated scrollregion: {self.canvas.bbox('all')}")
 
         # Make frames moveable and resizable
         for frame in [supplier_frame, yarn_frame, fabric_comp_frame]:
@@ -465,4 +461,5 @@ if __name__ == "__main__":
     root.title("Masters Management")
     app = MastersFrame(root)
     app.pack(fill="both", expand=True)
+    root.geometry("850x1050")  # Set initial window size to fit content
     root.mainloop()
