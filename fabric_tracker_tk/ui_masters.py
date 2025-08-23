@@ -40,19 +40,19 @@ class MastersFrame(ttk.Frame):
         print(f"[DEBUG] Canvas created with scrollregion: {self.canvas.bbox('all')}")
 
         # Supplier Section
-        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers", background="lightgray")  # Visible background
+        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")  # Removed background
         supplier_frame.place(x=10, y=10)
         print(f"[DEBUG] Supplier frame placed at (10, 10)")
         self.build_supplier_ui(supplier_frame)
 
         # Yarn Types Section
-        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types", background="lightgray")  # Visible background
+        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")  # Removed background
         yarn_frame.place(x=10, y=200)
         print(f"[DEBUG] Yarn frame placed at (10, 200)")
         self.build_yarn_type_ui(yarn_frame)
 
         # Fabric Compositions Section (combined)
-        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions", background="lightgray")  # Visible background
+        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")  # Removed background
         fabric_comp_frame.place(x=10, y=400)
         print(f"[DEBUG] Fabric comp frame placed at (10, 400)")
         self.build_fabric_composition_ui(fabric_comp_frame)
