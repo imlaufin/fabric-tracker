@@ -34,28 +34,32 @@ class MastersFrame(ttk.Frame):
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.inner_frame = ttk.Frame(self.canvas)
+        self.inner_frame = ttk.Frame(self.canvas, width=780, height=580)  # Set initial size
         self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
         self.inner_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         print(f"[DEBUG] Canvas created with scrollregion: {self.canvas.bbox('all')}")
 
         # Supplier Section
-        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")  # Removed background
-        supplier_frame.place(x=10, y=10)
+        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")
+        supplier_frame.place(x=10, y=10, width=760, height=180)  # Minimum size
         print(f"[DEBUG] Supplier frame placed at (10, 10)")
         self.build_supplier_ui(supplier_frame)
 
         # Yarn Types Section
-        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")  # Removed background
-        yarn_frame.place(x=10, y=200)
+        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")
+        yarn_frame.place(x=10, y=200, width=760, height=180)  # Minimum size
         print(f"[DEBUG] Yarn frame placed at (10, 200)")
         self.build_yarn_type_ui(yarn_frame)
 
         # Fabric Compositions Section (combined)
-        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")  # Removed background
-        fabric_comp_frame.place(x=10, y=400)
+        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")
+        fabric_comp_frame.place(x=10, y=400, width=760, height=180)  # Minimum size
         print(f"[DEBUG] Fabric comp frame placed at (10, 400)")
         self.build_fabric_composition_ui(fabric_comp_frame)
+
+        # Force scroll region update
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        print(f"[DEBUG] Updated scrollregion: {self.canvas.bbox('all')}")
 
         # Make frames moveable and resizable
         for frame in [supplier_frame, yarn_frame, fabric_comp_frame]:
