@@ -107,13 +107,13 @@ class DashboardFrame(ttk.Frame):
         batch_ref = self.batch_tree.item(item)["values"][0]
         with db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id, fabric_type_id, expected_lots, status FROM batches WHERE batch_ref=?", (batch_ref,))
+            cur.execute("SELECT id, fabric_type_name, expected_lots, status FROM batches WHERE batch_ref=?", (batch_ref,))
             row = cur.fetchone()
             if not row:
                 messagebox.showerror("Error", f"Batch '{batch_ref}' not found.")
                 return
             batch_id = row["id"]
-            fabric_type_id = row["fabric_type_id"]
+            fabric_type_name = row["fabric_type_name"]
             expected_lots = row["expected_lots"]
             status = row["status"]
 
@@ -127,8 +127,8 @@ class DashboardFrame(ttk.Frame):
         batch_e.insert(0, batch_ref)
 
         ttk.Label(dialog, text="Fabric Type:").grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        fabric_types = db.list_fabric_types()
-        fabric_var = tk.StringVar(value=next((f for f in fabric_types if db.get_connection().execute("SELECT id FROM fabric_types WHERE name=?", (f,)).fetchone()["id"] == fabric_type_id), ""))
+        fabric_types = [fc["name"] for fc in db.list_fabric_compositions()]  # Use unique fabric names
+        fabric_var = tk.StringVar(value=fabric_type_name or fabric_types[0] if fabric_types else "")
         ttk.OptionMenu(dialog, fabric_var, fabric_var.get(), *fabric_types).grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
         ttk.Label(dialog, text="Expected Lots:").grid(row=2, column=0, padx=5, pady=5, sticky="e")
@@ -161,17 +161,15 @@ class DashboardFrame(ttk.Frame):
 
             with db.get_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT id FROM fabric_types WHERE name=?", (fabric_type_name,))
-                fabric_type_id = cur.fetchone()
-                if not fabric_type_id:
+                cur.execute("SELECT 1 FROM fabric_compositions WHERE name=?", (fabric_type_name,))
+                if not cur.fetchone():
                     messagebox.showerror("Error", f"Fabric type '{fabric_type_name}' not found.")
                     return
-                fabric_type_id = fabric_type_id["id"]
                 cur.execute("""
                     UPDATE batches
-                    SET batch_ref=?, fabric_type_id=?, expected_lots=?, status=?
+                    SET batch_ref=?, fabric_type_name=?, expected_lots=?, status=?
                     WHERE id=?
-                """, (new_batch_ref, fabric_type_id, expected_lots, new_status, batch_id))
+                """, (new_batch_ref, fabric_type_name, expected_lots, new_status, batch_id))
                 conn.commit()
                 # Update lots if expected_lots changed
                 cur.execute("SELECT COUNT(*) FROM lots WHERE batch_id=?", (batch_id,))
@@ -264,9 +262,8 @@ class DashboardFrame(ttk.Frame):
             for r in self.batch_tree.get_children():
                 self.batch_tree.delete(r)
             cur.execute("""
-                SELECT b.batch_ref, ft.name AS fabric_type, b.expected_lots, b.status
+                SELECT b.batch_ref, b.fabric_type_name AS fabric_type, b.expected_lots, b.status
                 FROM batches b
-                LEFT JOIN fabric_types ft ON b.fabric_type_id = ft.id
                 WHERE b.fabricator_id IS NOT NULL
                 ORDER BY b.created_at DESC
             """)
