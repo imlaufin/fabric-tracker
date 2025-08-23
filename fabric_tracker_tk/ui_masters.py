@@ -20,8 +20,9 @@ class MastersFrame(ttk.Frame):
         self.selected_fabric = None  # Track selected fabric for composition
         self.frame_positions = {}  # Store positions for moveable frames
         self.frame_sizes = {}  # Store sizes for resizable frames
-        self.frame_spans = {"Suppliers": 1, "Yarn Types": 1, "Fabric Compositions": 1}  # Column span (1 or 2)
-        self.frame_grid = {"Suppliers": (0, 0), "Yarn Types": (1, 0), "Fabric Compositions": (1, 1)}  # (row, column)
+        self.frame_spans = {"Suppliers": 2, "Yarn Types": 1, "Fabric Compositions": 1}  # Initial spans (Suppliers starts at 1x2)
+        self.frame_grid = {"Suppliers": (0, 0), "Yarn Types": (1, 0), "Fabric Compositions": (1, 1)}  # Initial (row, column)
+        self.frames = {}  # Store frame references
         # Set theme to support background colors
         style = ttk.Style()
         style.theme_use("clam")
@@ -39,6 +40,7 @@ class MastersFrame(ttk.Frame):
         # Create and place frames with dynamic sizing
         for name in ["Suppliers", "Yarn Types", "Fabric Compositions"]:
             frame = ttk.LabelFrame(self, text=name)
+            self.frames[name] = frame
             row, col = self.frame_grid[name]
             span = self.frame_spans[name]
             frame.grid(row=row, column=col, columnspan=span, sticky="nsew")
@@ -379,16 +381,18 @@ class MastersFrame(ttk.Frame):
         self.comp_yarn_cb['values'] = db.list_yarn_types()
 
     def start_move(self, event, name):
-        frame = self.nametowidget(f".!labelframe{'.' + name.lower().replace(' ', '')}")
+        frame = self.frames[name]
         self.frame_positions[frame] = (event.x, event.y)
 
     def do_move(self, event, name):
-        frame = self.nametowidget(f".!labelframe{'.' + name.lower().replace(' ', '')}")
+        frame = self.frames[name]
         dx = event.x - self.frame_positions[frame][0]
         dy = event.y - self.frame_positions[frame][1]
         current_row, current_col = self.frame_grid[name]
-        new_row = max(0, min(1, current_row + (dy // (self.winfo_height() // 2))))  # Snap to row based on half height
-        new_col = max(0, min(3 - (self.frame_spans[name] - 1), current_col + (dx // (self.winfo_width() // 4))))  # Snap to column based on quarter width
+        cell_height = self.winfo_height() // 2
+        cell_width = self.winfo_width() // 4
+        new_row = max(0, min(1, current_row + (dy // cell_height)))  # Snap to row
+        new_col = max(0, min(3 - (self.frame_spans[name] - 1), current_col + (dx // cell_width)))  # Snap to column
         if new_row != current_row or new_col != current_col:
             # Check for collisions and adjust spans
             can_move = True
@@ -411,19 +415,19 @@ class MastersFrame(ttk.Frame):
         self.frame_positions[frame] = (event.x, event.y)
 
     def start_resize(self, event, name):
-        frame = self.nametowidget(f".!labelframe{'.' + name.lower().replace(' ', '')}")
+        frame = self.frames[name]
         self.frame_sizes[frame] = (frame.winfo_width(), frame.winfo_height())
         self.resize_start = (event.x, event.y)
 
     def do_resize(self, event, name):
-        frame = self.nametowidget(f".!labelframe{'.' + name.lower().replace(' ', '')}")
+        frame = self.frames[name]
         dx = event.x - self.resize_start[0]
-        # Calculate minimum width as half the window width (1x1 cell)
-        min_width = self.winfo_width() // 4
+        cell_width = self.winfo_width() // 4
+        min_width = cell_width
         new_width = max(min_width, self.frame_sizes[frame][0] + dx)
         row, col = self.frame_grid[name]
         current_span = self.frame_spans[name]
-        new_span = min(2, max(1, new_width // (self.winfo_width() // 4)))  # Dynamic span based on window width
+        new_span = min(2, max(1, new_width // cell_width))  # Dynamic span based on window width
         if new_span != current_span:
             # Check if expansion to 1x2 is possible
             if new_span == 2:
