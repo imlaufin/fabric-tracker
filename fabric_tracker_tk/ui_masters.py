@@ -158,6 +158,12 @@ class MastersFrame(ttk.Frame):
         self.fabric_comp_tree.column("ratio", width=100)
         self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)
 
+        # Add resize handle (visual cue)
+        self.resize_handle = tk.Label(parent, bg="gray", width=10, height=10)
+        self.resize_handle.place(relx=1.0, rely=1.0, anchor="se")
+        self.resize_handle.bind("<Button-3>", self.start_resize)
+        self.resize_handle.bind("<B3-Motion>", self.do_resize)
+
         # Right-click context menu for fabric compositions
         self.fabric_comp_menu = tk.Menu(self, tearoff=0)
         self.fabric_comp_menu.add_command(label="Edit Fabric", command=self.edit_fabric)
@@ -436,3 +442,10 @@ class MastersFrame(ttk.Frame):
         self.load_masters()
         if self.on_change_callback:
             self.on_change_callback()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("Masters Management")
+    app = MastersFrame(root)
+    app.pack(fill="both", expand=True)
+    root.mainloop()
