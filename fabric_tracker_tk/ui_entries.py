@@ -692,26 +692,30 @@ class EntriesFrame(ttk.Frame):
         if not item:
             return
         dyeing_id = int(item[0])
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT d.*, s.name as unit_name FROM dyeing_outputs d LEFT JOIN suppliers s ON d.dyeing_unit_id=s.id WHERE d.id=?", (dyeing_id,))
-            row = cur.fetchone()
-        if not row:
-            return
-        self.selected_dyeing_id = dyeing_id
-        self.dyeing_lot_e.delete(0, tk.END)
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
-            lot_row = cur.fetchone()
-        if lot_row:
-            self.dyeing_lot_e.insert(0, lot_row["lot_no"])
-        self.dyeing_unit_cb.set(row["unit_name"])
-        self.returned_date_e.delete(0, tk.END)
-        self.returned_date_e.insert(0, db.db_to_ui_date(row["returned_date"]))
-        self.returned_kg_e.delete(0, tk.END)
-        self.returned_kg_e.insert(0, row["returned_qty_kg"])
-        self.returned_rolls_e.delete(0, tk.END)
-        self.returned_rolls_e.insert(0, row["returned_qty_rolls"])
-        self.returned_notes_e.delete(0, tk.END)
-        self.returned_notes_e.insert(0, row["notes"])
+        try:
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT d.*, s.name as unit_name FROM dyeing_outputs d LEFT JOIN suppliers s ON d.dyeing_unit_id=s.id WHERE d.id=?", (dyeing_id,))
+                row = cur.fetchone()
+            if not row:
+                return
+            self.selected_dyeing_id = dyeing_id
+            self.dyeing_lot_e.delete(0, tk.END)
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT lot_no FROM lots WHERE id=?", (row["lot_id"],))
+                lot_row = cur.fetchone()
+            if lot_row:
+                self.dyeing_lot_e.insert(0, lot_row["lot_no"])
+            self.dyeing_unit_cb.set(row["unit_name"])
+            self.returned_date_e.delete(0, tk.END)
+            self.returned_date_e.insert(0, db.db_to_ui_date(row["returned_date"]))
+            self.returned_kg_e.delete(0, tk.END)
+            self.returned_kg_e.insert(0, row["returned_qty_kg"])
+            self.returned_rolls_e.delete(0, tk.END)
+            self.returned_rolls_e.insert(0, row["returned_qty_rolls"])
+            self.returned_notes_e.delete(0, tk.END)
+            self.returned_notes_e.insert(0, row["notes"])
+        except Exception as e:
+            messagebox.showerror("Database Error", f"Failed to load dyeing output: {str(e)}")
+            self.selected_dyeing_id = None
