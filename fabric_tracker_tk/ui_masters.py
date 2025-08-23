@@ -18,6 +18,8 @@ class MastersFrame(ttk.Frame):
         self.chosen_color = ""
         self.color_imgs = {}  # Store small color rectangles for treeview
         self.selected_fabric = None  # Track selected fabric for composition
+        self.frame_positions = {}  # Store positions for moveable frames
+        self.frame_sizes = {}  # Store sizes for resizable frames
         # Set theme to support background colors
         style = ttk.Style()
         style.theme_use("clam")
@@ -26,28 +28,37 @@ class MastersFrame(ttk.Frame):
         self.load_masters()
 
     def build_ui(self):
-        # Main frame with padding
-        self.pack(fill="both", expand=True, padx=10, pady=10)
+        # Main canvas with scrollbar
+        self.canvas = tk.Canvas(self, bg="white")
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.inner_frame = ttk.Frame(self.canvas)
+        self.canvas.create_window((0, 0), window=self.inner_frame, anchor="nw")
+        self.inner_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
 
         # Supplier Section
-        supplier_frame = ttk.LabelFrame(self, text="Suppliers")
+        supplier_frame = ttk.LabelFrame(self.inner_frame, text="Suppliers")
         supplier_frame.pack(fill="x", pady=5)
         self.build_supplier_ui(supplier_frame)
 
         # Yarn Types Section
-        yarn_frame = ttk.LabelFrame(self, text="Yarn Types")
+        yarn_frame = ttk.LabelFrame(self.inner_frame, text="Yarn Types")
         yarn_frame.pack(fill="x", pady=5)
         self.build_yarn_type_ui(yarn_frame)
 
-        # Fabric Types Section
-        fabric_frame = ttk.LabelFrame(self, text="Fabric Types")
-        fabric_frame.pack(fill="x", pady=5)
-        self.build_fabric_type_ui(fabric_frame)
+        # Fabric Compositions Section (combined)
+        fabric_comp_frame = ttk.LabelFrame(self.inner_frame, text="Fabric Compositions")
+        fabric_comp_frame.pack(fill="x", pady=5)
+        self.build_fabric_composition_ui(fabric_comp_frame)
 
-        # Fabric Composition Section
-        comp_frame = ttk.LabelFrame(self, text="Fabric Yarn Composition")
-        comp_frame.pack(fill="x", pady=5)
-        self.build_composition_ui(comp_frame)
+        # Make frames moveable and resizable
+        for frame in [supplier_frame, yarn_frame, fabric_comp_frame]:
+            frame.bind("<Button-1>", self.start_move)
+            frame.bind("<B1-Motion>", self.do_move)
+            frame.bind("<Button-3>", self.start_resize)
+            frame.bind("<B3-Motion>", self.do_resize)
 
     def build_supplier_ui(self, parent):
         top = ttk.Frame(parent)
@@ -97,7 +108,7 @@ class MastersFrame(ttk.Frame):
 
         self.yarn_tree = ttk.Treeview(parent, columns=("name",), show="headings", height=5)
         self.yarn_tree.heading("name", text="Yarn Type")
-        self.yarn_tree.column("name", width=350)
+        self.yarn_tree.column("name", width=100)  # Narrowed from 350 to 100
         self.yarn_tree.pack(fill="x", padx=5, pady=5)
 
         # Right-click context menu for yarn types
@@ -106,60 +117,54 @@ class MastersFrame(ttk.Frame):
         self.yarn_menu.add_command(label="Delete", command=self.delete_yarn_type)
         self.yarn_tree.bind("<Button-3>", self.show_yarn_context_menu)
 
-    def build_fabric_type_ui(self, parent):
+    def build_fabric_composition_ui(self, parent):
         top = ttk.Frame(parent)
         top.pack(fill="x", padx=5, pady=5)
 
+        # Fabric Name Input
         ttk.Label(top, text="Name:").grid(row=0, column=0, sticky="w")
         self.fabric_name_entry = ttk.Entry(top, width=30)
         self.fabric_name_entry.grid(row=0, column=1, padx=5)
 
-        ttk.Button(top, text="Add / Update", command=self.add_or_update_fabric_type).grid(row=0, column=2, padx=8)
-        ttk.Button(top, text="Delete", command=self.delete_fabric_type).grid(row=0, column=3, padx=5)
-
-        self.fabric_tree = ttk.Treeview(parent, columns=("name",), show="headings", height=5)
-        self.fabric_tree.heading("name", text="Fabric Type")
-        self.fabric_tree.column("name", width=350)
-        self.fabric_tree.pack(fill="x", padx=5, pady=5)
-
-        # Right-click context menu for fabric types
-        self.fabric_menu = tk.Menu(self, tearoff=0)
-        self.fabric_menu.add_command(label="Edit", command=self.edit_fabric_type)
-        self.fabric_menu.add_command(label="Delete", command=self.delete_fabric_type)
-        self.fabric_tree.bind("<Button-3>", self.show_fabric_context_menu)
-
-    def build_composition_ui(self, parent):
-        # Fabric Type Selection
-        ttk.Label(parent, text="Fabric Type:").grid(row=0, column=0, sticky="w")
-        self.comp_fabric_cb = ttk.Combobox(parent, values=db.list_fabric_types(), state="readonly", width=20)
-        self.comp_fabric_cb.grid(row=0, column=1, padx=5)
-        self.comp_fabric_cb.bind("<<ComboboxSelected>>", self.load_composition)
+        ttk.Button(top, text="Add / Update Fabric", command=self.add_or_update_fabric).grid(row=0, column=2, padx=8)
+        ttk.Button(top, text="Delete Fabric", command=self.delete_fabric).grid(row=0, column=3, padx=5)
 
         # Composition Fields
-        ttk.Label(parent, text="Component:").grid(row=0, column=2, sticky="w")
-        self.comp_component_cb = ttk.Combobox(parent, values=["Main Fabric", "Rib", "Collar"], state="readonly", width=12)
-        self.comp_component_cb.grid(row=0, column=3, padx=5)
+        ttk.Label(top, text="Component:").grid(row=1, column=0, sticky="w")
+        self.comp_component_cb = ttk.Combobox(top, values=["Main Fabric", "Rib", "Collar"], state="readonly", width=12)
+        self.comp_component_cb.grid(row=1, column=1, padx=5)
         self.comp_component_cb.current(0)
 
-        ttk.Label(parent, text="Yarn Type:").grid(row=0, column=4, sticky="w")
-        self.comp_yarn_cb = ttk.Combobox(parent, values=db.list_yarn_types(), state="readonly", width=20)
-        self.comp_yarn_cb.grid(row=0, column=5, padx=5)
+        ttk.Label(top, text="Yarn Type:").grid(row=1, column=2, sticky="w")
+        self.comp_yarn_cb = ttk.Combobox(top, values=db.list_yarn_types(), state="readonly", width=20)
+        self.comp_yarn_cb.grid(row=1, column=3, padx=5)
 
-        ttk.Label(parent, text="Ratio:").grid(row=0, column=6, sticky="w")
-        self.ratio_entry = ttk.Entry(parent, width=10)
-        self.ratio_entry.grid(row=0, column=7, padx=5)
+        ttk.Label(top, text="Ratio:").grid(row=1, column=4, sticky="w")
+        self.ratio_entry = ttk.Entry(top, width=10)
+        self.ratio_entry.grid(row=1, column=5, padx=5)
 
-        ttk.Button(parent, text="Add / Update Composition", command=self.add_or_update_composition).grid(row=0, column=8, padx=5)
-        ttk.Button(parent, text="Delete Composition", command=self.delete_composition).grid(row=0, column=9, padx=5)
+        ttk.Button(top, text="Add / Update Composition", command=self.add_or_update_composition).grid(row=1, column=6, padx=5)
+        ttk.Button(top, text="Delete Composition", command=self.delete_composition).grid(row=1, column=7, padx=5)
 
-        self.comp_tree = ttk.Treeview(parent, columns=("component", "yarn_type", "ratio"), show="headings", height=5)
-        self.comp_tree.heading("component", text="Component")
-        self.comp_tree.heading("yarn_type", text="Yarn Type")
-        self.comp_tree.heading("ratio", text="Ratio")
-        self.comp_tree.column("component", width=100)
-        self.comp_tree.column("yarn_type", width=150)
-        self.comp_tree.column("ratio", width=100)
-        self.comp_tree.grid(row=1, column=0, columnspan=10, padx=5, pady=5, sticky="ew")
+        # Combined Treeview
+        self.fabric_comp_tree = ttk.Treeview(parent, columns=("name", "component", "yarn_type", "ratio"), show="headings", height=5)
+        self.fabric_comp_tree.heading("name", text="Fabric Name")
+        self.fabric_comp_tree.heading("component", text="Component")
+        self.fabric_comp_tree.heading("yarn_type", text="Yarn Type")
+        self.fabric_comp_tree.heading("ratio", text="Ratio")
+        self.fabric_comp_tree.column("name", width=150)
+        self.fabric_comp_tree.column("component", width=100)
+        self.fabric_comp_tree.column("yarn_type", width=150)
+        self.fabric_comp_tree.column("ratio", width=100)
+        self.fabric_comp_tree.pack(fill="x", padx=5, pady=5)
+
+        # Right-click context menu for fabric compositions
+        self.fabric_comp_menu = tk.Menu(self, tearoff=0)
+        self.fabric_comp_menu.add_command(label="Edit Fabric", command=self.edit_fabric)
+        self.fabric_comp_menu.add_command(label="Delete Fabric", command=self.delete_fabric)
+        self.fabric_comp_menu.add_command(label="Edit Composition", command=self.edit_composition)
+        self.fabric_comp_menu.add_command(label="Delete Composition", command=self.delete_composition)
+        self.fabric_comp_tree.bind("<Button-3>", self.show_fabric_comp_context_menu)
 
     def choose_supplier_color(self):
         color = colorchooser.askcolor(title="Choose color")
@@ -171,7 +176,6 @@ class MastersFrame(ttk.Frame):
             self.supplier_color_btn.configure(text=self.chosen_color, style=style_name)
 
     def is_light_color(self, hex_color):
-        # Simple luminance check for text color contrast
         hex_color = hex_color.lstrip('#')
         r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
         luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
@@ -278,80 +282,61 @@ class MastersFrame(ttk.Frame):
             self.yarn_tree.selection_set(selected)
             self.yarn_menu.post(event.x_root, event.y_root)
 
-    def add_or_update_fabric_type(self):
+    def add_or_update_fabric(self):
         name = self.fabric_name_entry.get().strip()
         if not name:
             messagebox.showwarning("Missing", "Name required")
             return
         try:
-            db.add_fabric_type(name)
+            # Add fabric as a composition with no yarn (can be updated later)
+            db.add_fabric_composition(name, db.list_yarn_types()[0] if db.list_yarn_types() else "", 0.0, "Main Fabric")
             messagebox.showinfo("Saved", f"{name} saved/updated.")
             self.fabric_name_entry.delete(0, tk.END)
             self.load_masters()
             if self.on_change_callback:
                 self.on_change_callback()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save fabric type: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save fabric: {str(e)}")
 
-    def delete_fabric_type(self):
-        sel = self.fabric_tree.selection()
+    def delete_fabric(self):
+        sel = self.fabric_comp_tree.selection()
         if not sel:
             return
-        name = self.fabric_tree.item(sel[0])["values"][0]
+        name, _, _, _ = self.fabric_comp_tree.item(sel[0])["values"]
         if messagebox.askyesno("Confirm", f"Delete {name}?"):
-            if not db.delete_fabric_type(name):
+            if not db.delete_fabric_composition(name, "", ""):  # Delete all compositions for this fabric
                 messagebox.showwarning("Cannot Delete", f"{name} cannot be deleted (maybe in use).")
             self.load_masters()
             if self.on_change_callback:
                 self.on_change_callback()
 
-    def edit_fabric_type(self):
-        sel = self.fabric_tree.selection()
+    def edit_fabric(self):
+        sel = self.fabric_comp_tree.selection()
         if not sel:
             return
-        name = self.fabric_tree.item(sel[0])["values"][0]
+        name, _, _, _ = self.fabric_comp_tree.item(sel[0])["values"]
         self.fabric_name_entry.delete(0, tk.END)
         self.fabric_name_entry.insert(0, name)
 
-    def show_fabric_context_menu(self, event):
-        selected = self.fabric_tree.identify_row(event.y)
-        if selected:
-            self.fabric_tree.selection_set(selected)
-            self.fabric_menu.post(event.x_root, event.y_root)
-
-    def load_composition(self, event=None):
-        fabric_name = self.comp_fabric_cb.get()
-        if not fabric_name:
-            for r in self.comp_tree.get_children():
-                self.comp_tree.delete(r)
-            return
-        self.selected_fabric = fabric_name
-        for r in self.comp_tree.get_children():
-            self.comp_tree.delete(r)
-        compositions = db.get_fabric_yarn_composition(fabric_name)
-        for comp in compositions:
-            self.comp_tree.insert("", "end", values=(comp["component"], comp["yarn_type"], comp["ratio"]))
-
     def add_or_update_composition(self):
-        fabric_name = self.comp_fabric_cb.get()
+        fabric_name = self.fabric_name_entry.get().strip() or self.selected_fabric
+        if not fabric_name:
+            messagebox.showwarning("Missing", "Fabric name required")
+            return
         component = self.comp_component_cb.get()
         yarn_name = self.comp_yarn_cb.get()
         ratio_str = self.ratio_entry.get().strip()
-        if not fabric_name or not yarn_name or not ratio_str:
-            messagebox.showwarning("Missing", "All fields (Fabric, Component, Yarn, Ratio) are required.")
+        if not yarn_name or not ratio_str:
+            messagebox.showwarning("Missing", "Yarn and Ratio are required")
             return
         try:
             ratio = float(ratio_str)
             if ratio <= 0 or ratio > 100:
                 raise ValueError("Ratio must be between 0 and 100.")
-            compositions = db.get_fabric_yarn_composition(fabric_name)
-            existing_ratio = next((comp["ratio"] for comp in compositions if comp["component"] == component and comp["yarn_type"] == yarn_name), 0)
-            total_ratio = sum(comp["ratio"] for comp in compositions) - existing_ratio + ratio
-            if total_ratio > 100:
-                raise ValueError("Total ratio cannot exceed 100%.")
-            db.add_fabric_yarn_composition(fabric_name, yarn_name, ratio, component)
+            db.add_fabric_composition(fabric_name, yarn_name, ratio, component)
             messagebox.showinfo("Saved", f"Composition for {fabric_name} ({component}) updated.")
-            self.load_composition()
+            self.ratio_entry.delete(0, tk.END)
+            self.load_masters()
             if self.on_change_callback:
                 self.on_change_callback()
         except ValueError as e:
@@ -360,32 +345,42 @@ class MastersFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to save composition: {str(e)}")
 
     def delete_composition(self):
-        selected = self.comp_tree.selection()
-        if not selected:
+        sel = self.fabric_comp_tree.selection()
+        if not sel:
             return
-        component, yarn_type, _ = self.comp_tree.item(selected[0])["values"]
-        fabric_name = self.comp_fabric_cb.get()
-        if messagebox.askyesno("Confirm", f"Delete {component} composition for {yarn_type} from {fabric_name}?"):
-            with db.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute("""
-                    DELETE FROM fabric_yarn_composition
-                    WHERE fabric_type_id = (SELECT id FROM fabric_types WHERE name = ?)
-                    AND yarn_type_id = (SELECT id FROM yarn_types WHERE name = ?)
-                    AND component = ?
-                """, (fabric_name, yarn_type, component))
-                conn.commit()
-            self.load_composition()
+        name, component, yarn_type, _ = self.fabric_comp_tree.item(sel[0])["values"]
+        if messagebox.askyesno("Confirm", f"Delete {component} composition for {yarn_type} from {name}?"):
+            if not db.delete_fabric_composition(name, component, yarn_type):
+                messagebox.showwarning("Cannot Delete", f"Composition cannot be deleted (maybe in use).")
+            self.load_masters()
             if self.on_change_callback:
                 self.on_change_callback()
 
+    def edit_composition(self):
+        sel = self.fabric_comp_tree.selection()
+        if not sel:
+            return
+        name, component, yarn_type, ratio = self.fabric_comp_tree.item(sel[0])["values"]
+        self.fabric_name_entry.delete(0, tk.END)
+        self.fabric_name_entry.insert(0, name)
+        self.comp_component_cb.set(component)
+        self.comp_yarn_cb.set(yarn_type)
+        self.ratio_entry.delete(0, tk.END)
+        self.ratio_entry.insert(0, ratio)
+        self.selected_fabric = name
+
+    def show_fabric_comp_context_menu(self, event):
+        selected = self.fabric_comp_tree.identify_row(event.y)
+        if selected:
+            self.fabric_comp_tree.selection_set(selected)
+            self.fabric_comp_menu.post(event.x_root, event.y_root)
+
     def load_masters(self):
         # Clear all trees and images
-        for tree in [self.supplier_tree, self.yarn_tree, self.fabric_tree]:
+        for tree in [self.supplier_tree, self.yarn_tree, self.fabric_comp_tree]:
             for r in tree.get_children():
                 tree.delete(r)
         self.color_imgs.clear()
-        self.comp_tree.delete(*self.comp_tree.get_children())
 
         # Load Suppliers
         for row in db.list_suppliers():
@@ -404,13 +399,38 @@ class MastersFrame(ttk.Frame):
         for name in db.list_yarn_types():
             self.yarn_tree.insert("", "end", values=(name,))
 
-        # Load Fabric Types
-        for name in db.list_fabric_types():
-            self.fabric_tree.insert("", "end", values=(name,))
+        # Load Fabric Compositions
+        for comp in db.list_fabric_compositions():
+            self.fabric_comp_tree.insert("", "end", values=(comp["name"], comp["component"], comp["yarn_type"], comp["ratio"]))
 
         # Update comboboxes
-        self.comp_fabric_cb['values'] = db.list_fabric_types()
         self.comp_yarn_cb['values'] = db.list_yarn_types()
+
+    def start_move(self, event):
+        frame = event.widget
+        self.frame_positions[frame] = (event.x, event.y)
+
+    def do_move(self, event):
+        frame = event.widget
+        dx = event.x - self.frame_positions[frame][0]
+        dy = event.y - self.frame_positions[frame][1]
+        x, y = frame.winfo_x() + dx, frame.winfo_y() + dy
+        frame.place(x=x, y=y)
+        self.frame_positions[frame] = (event.x, event.y)
+
+    def start_resize(self, event):
+        frame = event.widget
+        self.frame_sizes[frame] = (frame.winfo_width(), frame.winfo_height())
+        self.resize_start = (event.x, event.y)
+
+    def do_resize(self, event):
+        frame = event.widget
+        dx = event.x - self.resize_start[0]
+        dy = event.y - self.resize_start[1]
+        new_width = max(100, self.frame_sizes[frame][0] + dx)
+        new_height = max(100, self.frame_sizes[frame][1] + dy)
+        frame.configure(width=new_width, height=new_height)
+        self.frame_sizes[frame] = (new_width, new_height)
 
     def reload_cb_and_notify(self):
         self.load_masters()
