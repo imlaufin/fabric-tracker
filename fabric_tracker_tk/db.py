@@ -101,11 +101,12 @@ def init_db():
         cur.execute("""
         CREATE TABLE IF NOT EXISTS fabric_compositions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE,
+            name TEXT NOT NULL,
             yarn_type_id INTEGER,
             component TEXT,
             quantity REAL,
             ratio REAL,
+            UNIQUE(name, component, yarn_type_id),
             FOREIGN KEY(yarn_type_id) REFERENCES yarn_types(id) ON DELETE CASCADE
         )
         """)
@@ -450,15 +451,19 @@ def add_fabric_composition(name: str, yarn_type_name: str, ratio: float, compone
             raise ValueError(f"Yarn type '{yarn_type_name}' not found.")
         yarn_type_id = yarn_type_id["id"]
 
-        # Check and adjust total ratio
-        cur.execute("SELECT SUM(ratio) AS total FROM fabric_compositions WHERE name=?", (name,))
+        # Check and adjust total ratio (exclude current row being updated)
+        cur.execute("""
+            SELECT SUM(ratio) AS total FROM fabric_compositions
+            WHERE name=? AND NOT (component=? AND yarn_type_id=?)
+        """, (name, component, yarn_type_id))
         total_ratio = cur.fetchone()["total"] or 0
         if total_ratio + ratio > 100:
             raise ValueError("Total ratio cannot exceed 100% after adding this composition.")
 
         cur.execute("""
-            INSERT OR REPLACE INTO fabric_compositions (name, yarn_type_id, component, ratio)
+            INSERT INTO fabric_compositions (name, yarn_type_id, component, ratio)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT(name, component, yarn_type_id) DO UPDATE SET ratio=excluded.ratio
         """, (name, yarn_type_id, component, ratio))
         conn.commit()
 
@@ -588,7 +593,8 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 cur.execute("SELECT name FROM fabric_compositions LIMIT 1")
-                fabric_type_name = cur.fetchone()["name"] if cur.fetchone() else None
+                _row = cur.fetchone()
+                fabric_type_name = _row["name"] if _row else None
                 if not fabric_type_name:
                     raise ValueError("No fabric type defined.")
                 cur.execute("""
@@ -935,7 +941,8 @@ def delete_dyeing_output(dyeing_id: int):
                 update_lot_status(lot_id, 'Knitted')
                 cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
                 min_status = cur.fetchone()["min_status"]
-                update_batch_status(batch_id, min_status)
+                if min_status:
+                    update_batch_status(batch_id, min_status)
         conn.commit()
 
 # Helper function to get batch_id by reference
@@ -943,6 +950,12 @@ def get_batch_id_by_ref(batch_ref):
     with get_connection() as conn:
         row = conn.execute("SELECT id FROM batches WHERE batch_ref=? LIMIT 1", (batch_ref,)).fetchone()
     return row["id"] if row else None
+
+def get_batch_ref_by_id(batch_id):
+    """Return the batch_ref string for a given integer batch id."""
+    with get_connection() as conn:
+        row = conn.execute("SELECT batch_ref FROM batches WHERE id=? LIMIT 1", (batch_id,)).fetchone()
+    return row["batch_ref"] if row else None
 
 def delete_batch(batch_ref):
     """Delete a batch and its associated lots, with safety checks."""
@@ -977,16 +990,22 @@ def update_batch_status(batch_id, status):
 def update_lot_status(lot_id, status):
     if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
         raise ValueError(f"Invalid status: {status}")
+    STATUS_ORDER = ['Ordered', 'Knitted', 'Dyed', 'Received']
     with get_connection() as conn:
         conn.execute("UPDATE lots SET status=? WHERE id=?", (status, lot_id))
-        # Update batch status based on minimum lot status
         cur = conn.cursor()
         cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
-        batch_id = cur.fetchone()["batch_id"]
-        cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
-        min_status = cur.fetchone()["min_status"]
-        if min_status == status:
-            conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return
+        batch_id = row["batch_id"]
+        # Determine batch status as the lowest-priority status among all lots
+        cur.execute("SELECT status FROM lots WHERE batch_id=?", (batch_id,))
+        lot_statuses = [r["status"] for r in cur.fetchall() if r["status"] in STATUS_ORDER]
+        if lot_statuses:
+            batch_status = min(lot_statuses, key=lambda s: STATUS_ORDER.index(s))
+            conn.execute("UPDATE batches SET status=? WHERE id=?", (batch_status, batch_id))
         conn.commit()
 
 def get_batch_status(batch_id):
