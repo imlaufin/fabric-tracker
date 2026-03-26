@@ -79,4 +79,4 @@ class YarnTypesScreen(ttk.Frame):
         selected = self.tree.selection()
         if selected:
             self.entry_name.delete(0, tk.END)
-            s
+            self.entry_name.insert(0, self.tree.item(selected[0])["values"][1])
