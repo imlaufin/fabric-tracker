@@ -500,13 +500,14 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Unit", f"Dyeing unit '{dyeing_unit}' not found.")
                 return
 
-            fabric_type_id = db.get_fabric_type_id_by_name(fabric_type)
-            if not fabric_type_id:
+            # Validate fabric type name directly (schema uses fabric_type_name, not id)
+            known_fabrics = [fc["name"] for fc in db.list_fabric_compositions()]
+            if fabric_type not in known_fabrics:
                 messagebox.showerror("Invalid Fabric", f"Fabric type '{fabric_type}' not found.")
                 return
 
             composition = f"Rib: {has_rib}, Collar: {has_collar}"
-            db.create_batch(batch_num, knitting_id, fabric_type_id, lots_int, composition, dyeing_id)
+            db.create_batch(batch_num, knitting_id, fabric_type, lots_int, composition, dyeing_id)
             messagebox.showinfo("Success", f"Batch '{batch_num}' created with {lots_int} lots.")
             dialog.destroy()
             self.refresh_lists()
@@ -573,7 +574,7 @@ class EntriesFrame(ttk.Frame):
 
             # Fetch batch and fabric type to validate yarn composition
             cur.execute("""
-                SELECT b.id AS batch_id, b.fabric_type_id
+                SELECT b.id AS batch_id, b.fabric_type_name
                 FROM lots l
                 JOIN batches b ON l.batch_id = b.id
                 WHERE l.lot_no = ?
@@ -583,28 +584,30 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not associated with any batch.")
                 return
             batch_id = batch_row["batch_id"]
-            fabric_type_id = batch_row["fabric_type_id"]
+            fabric_type_name = batch_row["fabric_type_name"]
 
             # Validate yarn quantity against fabric composition
             cur.execute("""
-                SELECT yc.yarn_type, yc.ratio
-                FROM fabric_yarn_composition yc
-                WHERE yc.fabric_type_id = ?
-            """, (fabric_type_id,))
+                SELECT yt.name AS yarn_type, fc.ratio
+                FROM fabric_compositions fc
+                JOIN yarn_types yt ON fc.yarn_type_id = yt.id
+                WHERE fc.name = ?
+            """, (fabric_type_name,))
             compositions = cur.fetchall()
             if not compositions:
                 messagebox.showwarning("No Composition", f"No yarn composition defined for the fabric type of batch '{batch_id}'. Proceed with caution.")
             else:
-                total_purchased_kg = 0
-                cur.execute("SELECT SUM(qty_kg) AS total FROM purchases WHERE batch_id = ? AND lot_no = ?", (db.get_batch_ref_by_id(batch_id), lot_no))
-                total_purchased_kg_row = cur.fetchone()
-                total_purchased_kg = total_purchased_kg_row["total"] or 0
+                cur.execute(
+                    "SELECT SUM(qty_kg) AS total FROM purchases WHERE batch_id = ? AND lot_no = ?",
+                    (db.get_batch_ref_by_id(batch_id) or "", lot_no)
+                )
+                total_purchased_kg = (cur.fetchone()["total"] or 0)
                 for comp in compositions:
                     yarn_type = comp["yarn_type"]
                     ratio = comp["ratio"]
                     expected_kg = total_purchased_kg * (ratio / 100)
                     if kg > expected_kg:
-                        messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg}) for yarn '{yarn_type}' based on composition.")
+                        messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg:.2f}) for yarn '{yarn_type}' based on composition.")
                         return
 
             # Record dyeing output
