@@ -56,6 +56,7 @@ class EntriesFrame(ttk.Frame):
         self.controller = controller
         self.selected_purchase_id = None
         self.selected_dyeing_id = None
+        self.active_firm = db.FIRMS[0]  # Persists until manually changed
         self._last_purchase_defaults = {
             "date": datetime.today().strftime("%d/%m/%Y"),
             "batch": "",
@@ -70,6 +71,19 @@ class EntriesFrame(ttk.Frame):
         self.reload_dyeing_outputs()
 
     def build_ui(self):
+        # --- Firm Selector (persistent) ---
+        firm_bar = ttk.Frame(self)
+        firm_bar.pack(fill="x", padx=8, pady=(6, 0))
+        ttk.Label(firm_bar, text="Active Firm:", font=("Arial", 10, "bold")).pack(side="left", padx=(0, 8))
+        self._firm_var = tk.StringVar(value=self.active_firm)
+        for firm in db.FIRMS:
+            ttk.Radiobutton(
+                firm_bar, text=firm, variable=self._firm_var,
+                value=firm, command=self._on_firm_change
+            ).pack(side="left", padx=6)
+        self._firm_label = ttk.Label(firm_bar, text=f"({self.active_firm})", foreground="gray")
+        self._firm_label.pack(side="left", padx=8)
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
         self.tab_purchases = ttk.Frame(self.notebook)
@@ -80,6 +94,12 @@ class EntriesFrame(ttk.Frame):
         self.notebook.add(self.tab_dyeing, text="Dyeing Outputs")
         self.build_dyeing_form(self.tab_dyeing)
         self.build_dyeing_table(self.tab_dyeing)
+
+    def _on_firm_change(self):
+        self.active_firm = self._firm_var.get()
+        self._firm_label.config(text=f"({self.active_firm})")
+        self.reload_entries()
+        self.reload_dyeing_outputs()
 
     def build_purchase_form(self, parent):
         frm = ttk.Frame(parent)
@@ -132,9 +152,9 @@ class EntriesFrame(ttk.Frame):
                 break
 
     def build_purchase_table(self, parent):
-        cols = ("date", "batch", "lot", "supplier", "yarn", "kg", "rolls", "price", "delivered")
-        headings = ["Date", "Batch", "Lot", "Supplier", "Yarn Type", "Kg", "Rolls", "Price/unit", "Delivered"]
-        widths = [90, 90, 110, 150, 150, 80, 80, 80, 140]
+        cols = ("firm", "date", "batch", "lot", "supplier", "yarn", "kg", "rolls", "price", "delivered")
+        headings = ["Firm", "Date", "Batch", "Lot", "Supplier", "Yarn Type", "Kg", "Rolls", "Price/unit", "Delivered"]
+        widths = [140, 90, 90, 110, 150, 150, 80, 80, 80, 140]
         frame = ttk.Frame(parent)
         frame.pack(fill="both", expand=True, padx=8, pady=8)
         self.tree_scroll_y = ttk.Scrollbar(frame, orient="vertical")
@@ -291,11 +311,15 @@ class EntriesFrame(ttk.Frame):
             self.tree.delete(r)
         with db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM purchases ORDER BY date DESC")
+            cur.execute(
+                "SELECT * FROM purchases WHERE firm_name=? ORDER BY date DESC",
+                (self.active_firm,)
+            )
             for row in cur.fetchall():
                 display_date = db.db_to_ui_date(row["date"])
                 self.tree.insert("", "end", iid=row["id"], values=(
-                    display_date, row["batch_id"], row["lot_no"], row["supplier"], row["yarn_type"],
+                    row["firm_name"], display_date, row["batch_id"], row["lot_no"],
+                    row["supplier"], row["yarn_type"],
                     row["qty_kg"], row["qty_rolls"], row["price_per_unit"], row["delivered_to"]
                 ))
 
@@ -320,9 +344,9 @@ class EntriesFrame(ttk.Frame):
             messagebox.showwarning("Invalid Quantity", "At least one of Qty (kg) or Qty (rolls) must be greater than 0")
             return
 
-        self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar)
+        self.validate_and_snap(date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar, self.active_firm)
 
-    def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar):
+    def validate_and_snap(self, date, yarn, kg, rolls, delivered, supplier, batch, lot, price, includes_rib_collar, firm_name=""):
         if not date or not yarn or not delivered:
             messagebox.showwarning("Missing", "Please fill required fields: Date, Yarn Type, Delivered To")
             return
@@ -341,7 +365,7 @@ class EntriesFrame(ttk.Frame):
 
         try:
             if self.selected_purchase_id:
-                db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                db.edit_purchase(self.selected_purchase_id, date, batch, lot, supplier, yarn, kg, rolls, price, delivered, firm_name=firm_name)
                 db.update_batch_status(batch, 'Ordered')  # Update status on edit
             else:
                 with db.get_connection() as conn:
@@ -350,7 +374,7 @@ class EntriesFrame(ttk.Frame):
                     row = cur.fetchone()
                     if row:
                         fabric_type_id = row["fabric_type_id"]
-                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered, firm_name=firm_name)
                         db.update_batch_status(batch, 'Ordered')  # Update status on new purchase
                         # Rib/Collar validation (stock check handled by db.py)
                         if includes_rib_collar:
@@ -363,7 +387,7 @@ class EntriesFrame(ttk.Frame):
                             if not rib_collar_comps:
                                 messagebox.showwarning("No Composition", "No Rib/Collar composition defined for this batch.")
                     else:
-                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered)
+                        db.record_purchase(date, batch, lot, supplier, yarn, kg, rolls, price, delivered, firm_name=firm_name)
                         db.update_batch_status(batch, 'Ordered')  # Update status for new batch
         except ValueError as e:
             messagebox.showerror("Invalid Date", str(e))
@@ -500,14 +524,13 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Unit", f"Dyeing unit '{dyeing_unit}' not found.")
                 return
 
-            # Validate fabric type name directly (schema uses fabric_type_name, not id)
-            known_fabrics = [fc["name"] for fc in db.list_fabric_compositions()]
-            if fabric_type not in known_fabrics:
+            fabric_type_id = db.get_fabric_type_id_by_name(fabric_type)
+            if not fabric_type_id:
                 messagebox.showerror("Invalid Fabric", f"Fabric type '{fabric_type}' not found.")
                 return
 
             composition = f"Rib: {has_rib}, Collar: {has_collar}"
-            db.create_batch(batch_num, knitting_id, fabric_type, lots_int, composition, dyeing_id)
+            db.create_batch(batch_num, knitting_id, fabric_type_id, lots_int, composition, dyeing_id)
             messagebox.showinfo("Success", f"Batch '{batch_num}' created with {lots_int} lots.")
             dialog.destroy()
             self.refresh_lists()
@@ -574,7 +597,7 @@ class EntriesFrame(ttk.Frame):
 
             # Fetch batch and fabric type to validate yarn composition
             cur.execute("""
-                SELECT b.id AS batch_id, b.fabric_type_name
+                SELECT b.id AS batch_id, b.fabric_type_id
                 FROM lots l
                 JOIN batches b ON l.batch_id = b.id
                 WHERE l.lot_no = ?
@@ -584,30 +607,28 @@ class EntriesFrame(ttk.Frame):
                 messagebox.showerror("Invalid Lot", f"Lot '{lot_no}' is not associated with any batch.")
                 return
             batch_id = batch_row["batch_id"]
-            fabric_type_name = batch_row["fabric_type_name"]
+            fabric_type_id = batch_row["fabric_type_id"]
 
             # Validate yarn quantity against fabric composition
             cur.execute("""
-                SELECT yt.name AS yarn_type, fc.ratio
-                FROM fabric_compositions fc
-                JOIN yarn_types yt ON fc.yarn_type_id = yt.id
-                WHERE fc.name = ?
-            """, (fabric_type_name,))
+                SELECT yc.yarn_type, yc.ratio
+                FROM fabric_yarn_composition yc
+                WHERE yc.fabric_type_id = ?
+            """, (fabric_type_id,))
             compositions = cur.fetchall()
             if not compositions:
                 messagebox.showwarning("No Composition", f"No yarn composition defined for the fabric type of batch '{batch_id}'. Proceed with caution.")
             else:
-                cur.execute(
-                    "SELECT SUM(qty_kg) AS total FROM purchases WHERE batch_id = ? AND lot_no = ?",
-                    (db.get_batch_ref_by_id(batch_id) or "", lot_no)
-                )
-                total_purchased_kg = (cur.fetchone()["total"] or 0)
+                total_purchased_kg = 0
+                cur.execute("SELECT SUM(qty_kg) AS total FROM purchases WHERE batch_id = ? AND lot_no = ?", (db.get_batch_ref_by_id(batch_id), lot_no))
+                total_purchased_kg_row = cur.fetchone()
+                total_purchased_kg = total_purchased_kg_row["total"] or 0
                 for comp in compositions:
                     yarn_type = comp["yarn_type"]
                     ratio = comp["ratio"]
                     expected_kg = total_purchased_kg * (ratio / 100)
                     if kg > expected_kg:
-                        messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg:.2f}) for yarn '{yarn_type}' based on composition.")
+                        messagebox.showwarning("Over Allocation", f"Returned kg ({kg}) exceeds expected kg ({expected_kg}) for yarn '{yarn_type}' based on composition.")
                         return
 
             # Record dyeing output
@@ -689,6 +710,11 @@ class EntriesFrame(ttk.Frame):
         self.price_e.insert(0, row["price_per_unit"])
         self.delivered_cb.set(row["delivered_to"])
         self.rib_collar_var.set(False)  # Reset Rib/Collar checkbox (no stored state yet)
+        # Switch active firm to match the purchase being edited
+        row_firm = row["firm_name"] if row["firm_name"] else self.active_firm
+        self.active_firm = row_firm
+        self._firm_var.set(row_firm)
+        self._firm_label.config(text=f"({row_firm})")
         self._last_purchase_defaults.update({
             "date": self.date_e.get(),
             "batch": self.batch_e.get(),
