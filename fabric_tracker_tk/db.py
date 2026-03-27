@@ -9,6 +9,7 @@ DB_NAME = "fabric_tracker.db"
 BACKUP_DIR = "backups"
 MAX_BACKUPS = 5  # keep only latest 5 backups
 DEFAULT_NAMES = ["Shiv Fabrics", "Oswal Finishing Mills"]
+FIRMS = ["S.P. Knitting Works", "R K Bhushan Hosiery"]
 COST_RATES = {"knitting": 5.0, "dyeing": 10.0}  # Configurable rates in $/kg
 
 # Define persistent database path
@@ -101,12 +102,11 @@ def init_db():
         cur.execute("""
         CREATE TABLE IF NOT EXISTS fabric_compositions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            name TEXT UNIQUE,
             yarn_type_id INTEGER,
             component TEXT,
             quantity REAL,
             ratio REAL,
-            UNIQUE(name, component, yarn_type_id),
             FOREIGN KEY(yarn_type_id) REFERENCES yarn_types(id) ON DELETE CASCADE
         )
         """)
@@ -123,7 +123,8 @@ def init_db():
             price_per_unit REAL DEFAULT 0,
             delivered_to TEXT,
             notes TEXT,
-            includes_rib_collar INTEGER DEFAULT 0
+            includes_rib_collar INTEGER DEFAULT 0,
+            firm_name TEXT DEFAULT ''
         )
         """)
         cur.execute("""
@@ -137,6 +138,7 @@ def init_db():
             status TEXT DEFAULT 'Ordered',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             dyeing_unit_id INTEGER,
+            firm_name TEXT DEFAULT '',
             FOREIGN KEY(fabricator_id) REFERENCES suppliers(id),
             FOREIGN KEY(dyeing_unit_id) REFERENCES suppliers(id)
         )
@@ -217,7 +219,19 @@ def init_db():
             """)
             cur.execute("ALTER TABLE batches DROP COLUMN fabric_type_id")
 
-        # Indexes
+        # Migration: Add firm_name to purchases if missing
+        cur.execute("PRAGMA table_info(purchases)")
+        purchase_cols = [row["name"] for row in cur.fetchall()]
+        if "firm_name" not in purchase_cols:
+            cur.execute("ALTER TABLE purchases ADD COLUMN firm_name TEXT DEFAULT ''")
+
+        # Migration: Add firm_name to batches if missing
+        cur.execute("PRAGMA table_info(batches)")
+        batch_cols = [row["name"] for row in cur.fetchall()]
+        if "firm_name" not in batch_cols:
+            cur.execute("ALTER TABLE batches ADD COLUMN firm_name TEXT DEFAULT ''")
+
+                # Indexes
         cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_delivered_to ON purchases(delivered_to)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_purchases_batch ON purchases(batch_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_batches_ref ON batches(batch_ref)")
@@ -451,19 +465,15 @@ def add_fabric_composition(name: str, yarn_type_name: str, ratio: float, compone
             raise ValueError(f"Yarn type '{yarn_type_name}' not found.")
         yarn_type_id = yarn_type_id["id"]
 
-        # Check and adjust total ratio (exclude current row being updated)
-        cur.execute("""
-            SELECT SUM(ratio) AS total FROM fabric_compositions
-            WHERE name=? AND NOT (component=? AND yarn_type_id=?)
-        """, (name, component, yarn_type_id))
+        # Check and adjust total ratio
+        cur.execute("SELECT SUM(ratio) AS total FROM fabric_compositions WHERE name=?", (name,))
         total_ratio = cur.fetchone()["total"] or 0
         if total_ratio + ratio > 100:
             raise ValueError("Total ratio cannot exceed 100% after adding this composition.")
 
         cur.execute("""
-            INSERT INTO fabric_compositions (name, yarn_type_id, component, ratio)
+            INSERT OR REPLACE INTO fabric_compositions (name, yarn_type_id, component, ratio)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(name, component, yarn_type_id) DO UPDATE SET ratio=excluded.ratio
         """, (name, yarn_type_id, component, ratio))
         conn.commit()
 
@@ -518,7 +528,7 @@ def search_batches_prefix(prefix: str, limit: int = 20):
         ).fetchall()]
     return rows
 
-def create_batch(batch_ref, fabricator_id, fabric_type_name, expected_lots, composition="", dyeing_unit_id=None):
+def create_batch(batch_ref, fabricator_id, fabric_type_name, expected_lots, composition="", dyeing_unit_id=None, firm_name=""):
     """Create a batch with a specified fabric type."""
     with get_connection() as conn:
         cur = conn.cursor()
@@ -527,9 +537,9 @@ def create_batch(batch_ref, fabricator_id, fabric_type_name, expected_lots, comp
             raise ValueError(f"Fabric type '{fabric_type_name}' not found.")
         
         cur.execute("""
-            INSERT INTO batches (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id))
+            INSERT INTO batches (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id, firm_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (batch_ref, fabricator_id, fabric_type_name, expected_lots, composition, dyeing_unit_id, firm_name))
         bid = cur.lastrowid
         conn.commit()  # Commit batch immediately
 
@@ -581,7 +591,7 @@ def search_lots_prefix(prefix: str, limit: int = 20):
 # Purchases / Dyeing Outputs
 # ----------------------------
 def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
-                    price_per_unit=0, delivered_to="", notes="", includes_rib_collar=0):
+                    price_per_unit=0, delivered_to="", notes="", includes_rib_collar=0, firm_name=""):
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     with get_connection() as conn:
@@ -593,8 +603,7 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
             if fabricator_id:
                 batch_id = f"BATCH_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 cur.execute("SELECT name FROM fabric_compositions LIMIT 1")
-                _row = cur.fetchone()
-                fabric_type_name = _row["name"] if _row else None
+                fabric_type_name = cur.fetchone()["name"] if cur.fetchone() else None
                 if not fabric_type_name:
                     raise ValueError("No fabric type defined.")
                 cur.execute("""
@@ -612,9 +621,9 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
 
         # Record purchase
         cur.execute("""
-            INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar))
+            INSERT INTO purchases (date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar, firm_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar, firm_name))
         purchase_id = cur.lastrowid
 
         # Update stock
@@ -683,7 +692,7 @@ def record_purchase(date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rol
     return purchase_id
 
 def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls,
-                  price_per_unit, delivered_to, notes="", includes_rib_collar=0):
+                  price_per_unit, delivered_to, notes="", includes_rib_collar=0, firm_name=""):
     if not is_delivered_to_valid(delivered_to):
         raise ValueError(f"Delivered To '{delivered_to}' not found in Masters.")
     with get_connection() as conn:
@@ -731,9 +740,9 @@ def edit_purchase(purchase_id, date, batch_id, lot_no, supplier, yarn_type, qty_
         # Update purchase
         cur.execute("""
             UPDATE purchases
-            SET date=?, batch_id=?, lot_no=?, supplier=?, yarn_type=?, qty_kg=?, qty_rolls=?, price_per_unit=?, delivered_to=?, notes=?, includes_rib_collar=?
+            SET date=?, batch_id=?, lot_no=?, supplier=?, yarn_type=?, qty_kg=?, qty_rolls=?, price_per_unit=?, delivered_to=?, notes=?, includes_rib_collar=?, firm_name=?
             WHERE id=?
-        """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar, purchase_id))
+        """, (ui_to_db_date(date), batch_id, lot_no, supplier, yarn_type, qty_kg, qty_rolls, price_per_unit, delivered_to, notes, includes_rib_collar, firm_name, purchase_id))
 
         # Adjust new stock
         if delivered_to:
@@ -941,8 +950,7 @@ def delete_dyeing_output(dyeing_id: int):
                 update_lot_status(lot_id, 'Knitted')
                 cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
                 min_status = cur.fetchone()["min_status"]
-                if min_status:
-                    update_batch_status(batch_id, min_status)
+                update_batch_status(batch_id, min_status)
         conn.commit()
 
 # Helper function to get batch_id by reference
@@ -950,12 +958,6 @@ def get_batch_id_by_ref(batch_ref):
     with get_connection() as conn:
         row = conn.execute("SELECT id FROM batches WHERE batch_ref=? LIMIT 1", (batch_ref,)).fetchone()
     return row["id"] if row else None
-
-def get_batch_ref_by_id(batch_id):
-    """Return the batch_ref string for a given integer batch id."""
-    with get_connection() as conn:
-        row = conn.execute("SELECT batch_ref FROM batches WHERE id=? LIMIT 1", (batch_id,)).fetchone()
-    return row["batch_ref"] if row else None
 
 def delete_batch(batch_ref):
     """Delete a batch and its associated lots, with safety checks."""
@@ -990,22 +992,16 @@ def update_batch_status(batch_id, status):
 def update_lot_status(lot_id, status):
     if status not in ['Ordered', 'Knitted', 'Dyed', 'Received']:
         raise ValueError(f"Invalid status: {status}")
-    STATUS_ORDER = ['Ordered', 'Knitted', 'Dyed', 'Received']
     with get_connection() as conn:
         conn.execute("UPDATE lots SET status=? WHERE id=?", (status, lot_id))
+        # Update batch status based on minimum lot status
         cur = conn.cursor()
         cur.execute("SELECT batch_id FROM lots WHERE id=?", (lot_id,))
-        row = cur.fetchone()
-        if not row:
-            conn.commit()
-            return
-        batch_id = row["batch_id"]
-        # Determine batch status as the lowest-priority status among all lots
-        cur.execute("SELECT status FROM lots WHERE batch_id=?", (batch_id,))
-        lot_statuses = [r["status"] for r in cur.fetchall() if r["status"] in STATUS_ORDER]
-        if lot_statuses:
-            batch_status = min(lot_statuses, key=lambda s: STATUS_ORDER.index(s))
-            conn.execute("UPDATE batches SET status=? WHERE id=?", (batch_status, batch_id))
+        batch_id = cur.fetchone()["batch_id"]
+        cur.execute("SELECT MIN(status) AS min_status FROM lots WHERE batch_id=?", (batch_id,))
+        min_status = cur.fetchone()["min_status"]
+        if min_status == status:
+            conn.execute("UPDATE batches SET status=? WHERE id=?", (status, batch_id))
         conn.commit()
 
 def get_batch_status(batch_id):
